@@ -110,9 +110,8 @@ bot.on("message", async (msg) => {
   } catch (error) {
   console.error("AI ERROR:", error.response?.status, error.response?.data || error.message);
   await bot.sendMessage(chatId, "AI навернулся. Проверь API ключ, модель или код.");
-}
-}
-);
+  }
+});
 const users = new Set();
 
 bot.onText(/\/start/, async (msg) => {
@@ -136,11 +135,11 @@ bot.onText(/\/help/, async (msg) => {
 });
 bot.onText(/\/reset/, async (msg) => {
   const chatId = msg.chat.id;
-
   chats[chatId] = [];
 
-  await bot.sendMessage(chatId, "Память этого чата очищена 🧹"
-)})
+  await bot.sendMessage(chatId, "Память этого чата очищена 🧹");
+});
+
 const express = require("express");
 const app = express();
 
