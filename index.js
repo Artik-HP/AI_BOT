@@ -150,7 +150,6 @@ bot.onText(/\/reset/, async (msg) => {
 
   await bot.sendMessage(chatId, "Память этого чата очищена 🧹"
 )})
-const express = require("express");
 const app = express();
 
 app.get("/", (req, res) => {
