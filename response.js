@@ -2,7 +2,7 @@ async function createChatCompletion({ axios, systemMessage, chats, chatId }) {
   return axios.post(
     "https://openrouter.ai/api/v1/chat/completions",
     {
-      model: "deepseek/deepseek-chat-v3.1",
+      model: process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
       temperature: 0.9,
       top_p: 0.95,
       messages: [

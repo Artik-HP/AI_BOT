@@ -10,10 +10,6 @@ const axios = require("axios");
 
 // Initialize Vercel Speed Insights
 injectSpeedInsights();
-const bot = new TelegramBot(process.env.BOT_TOKEN, {
-  polling: true
-});
-
 console.log("Бот запущен");
 
 // 1. System prompt
@@ -22,7 +18,7 @@ const express = require("express");
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const PORT = process.env.PORT || 3000;
-const MODEL = process.env.OPENROUTER_MODEL || "deepseek/deepseek-chat-v3.1";
+const MODEL = process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
 const STT_MODEL = process.env.OPENROUTER_STT_MODEL || "openai/whisper-large-v3";
 const AUDIO_FALLBACK_MODEL = process.env.OPENROUTER_AUDIO_MODEL || "openai/gpt-4o-audio-preview";
 const STT_LANGUAGE = process.env.OPENROUTER_STT_LANGUAGE;
