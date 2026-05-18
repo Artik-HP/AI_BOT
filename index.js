@@ -1,8 +1,12 @@
 require("dotenv").config();
+const { injectSpeedInsights } = require("@vercel/speed-insights");
 console.log("BOT_TOKEN есть?", !!process.env.BOT_TOKEN);
 console.log("ENV путь:", process.cwd());
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
+
+// Initialize Vercel Speed Insights
+injectSpeedInsights();
 const bot = new TelegramBot(process.env.BOT_TOKEN, {
   polling: true
 });
