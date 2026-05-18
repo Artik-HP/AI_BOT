@@ -143,15 +143,7 @@ bot.onText(/\/reset/, async (msg) => {
   await bot.sendMessage(chatId, "Память этого чата очищена 🧹");
 });
 
-bot.onText(/\/help/, async (msg) => {
-  const chatId = msg.chat.id;
-
-  await bot.sendMessage(
-    chatId,
-    "Команды:\n/start — запустить бота\n/help — помощь\n/reset — очистить память\n/persona — изменить стиль"
-  );
-});
-    bot.onText(/\/reset/, async (msg) => {
+bot.onText(/\/reset/, async (msg) => {
   const chatId = msg.chat.id;
 
   chats[chatId] = [];
