@@ -162,3 +162,15 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("WEB SERVER STARTED");
 });
+const express = require("express");
+const app = express();
+
+app.get("/", (req, res) => {
+  res.send("Bot is alive");
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("WEB SERVER STARTED");
+});
