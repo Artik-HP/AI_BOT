@@ -96,7 +96,6 @@ const systemPrompt = {
   ].join("\n")
 };
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 let chats = loadMemory();
 
