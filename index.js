@@ -80,8 +80,12 @@ if (!OPENROUTER_API_KEY) {
   throw new Error("OPENROUTER_API_KEY не найден в .env");
 }
 
+const bot = new TelegramBot(BOT_TOKEN, {
+  polling: true
+}); 
+
 const systemPrompt = {
-  role: "system",
+role: "system",
   content: [
     "Ты живой, умный AI-психотерапевт и наркоман с хорошей памятью контекста.",
     "Отвечай естественно, по-человечески, без канцелярита и лишней воды.",
