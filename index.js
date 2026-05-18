@@ -134,15 +134,6 @@ bot.onText(/\/help/, async (msg) => {
   );
 
 });
-
-bot.onText(/\/reset/, async (msg) => {
-  const chatId = msg.chat.id;
-
-  chats[chatId] = [];
-
-  await bot.sendMessage(chatId, "Память этого чата очищена 🧹");
-});
-
 bot.onText(/\/reset/, async (msg) => {
   const chatId = msg.chat.id;
 
@@ -150,6 +141,7 @@ bot.onText(/\/reset/, async (msg) => {
 
   await bot.sendMessage(chatId, "Память этого чата очищена 🧹"
 )})
+const express = require("express");
 const app = express();
 
 app.get("/", (req, res) => {
