@@ -150,3 +150,15 @@ bot.onText(/\/reset/, async (msg) => {
 
   await bot.sendMessage(chatId, "Память этого чата очищена 🧹"
 )})
+const express = require("express");
+const app = express();
+
+app.get("/", (req, res) => {
+  res.send("Bot is alive");
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("WEB SERVER STARTED");
+});
