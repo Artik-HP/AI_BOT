@@ -89,7 +89,7 @@ if (!CONFIG.OPENROUTER_API_KEY) {
   throw new Error("OPENROUTER_API_KEY не найден в .env");
 }
 
-const bot = new TelegramBot(BOT_TOKEN, {
+const bot = new TelegramBot(CONFIG.BOT_TOKEN, {
   polling: true
 }); 
 
@@ -388,7 +388,7 @@ async function downloadTelegramFile(fileId) {
     responseType: "arraybuffer",
     timeout: 60000,
     maxContentLength: CONFIG.MAX_AUDIO_BYTES,
-    maxBodyLength: MAX_AUDIO_BYTES
+    maxBodyLength: CONFIG.MAX_AUDIO_BYTES
   });
 
   const audioBuffer = Buffer.from(response.data);
