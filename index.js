@@ -618,9 +618,7 @@ bot.on("message", async (msg) => {
         "Не смог прочитать голосовое сообщение. Попробуй короче или проверь OPENROUTER_STT_MODEL / OPENROUTER_AUDIO_MODEL и доступ к OpenRouter."
       );
     }
-const bot = new TelegramBot(BOT_TOKEN, {
-  polling: true
-});
+
     return;
   }
 
