@@ -12,7 +12,7 @@ const express = require("express");
 const CONFIG = {
   MODEL:
     process.env.OPENROUTER_MODEL ||
-    "baidu/ernie-4.5-21b-a3b-thinking",
+    "google/gemini-3.1-flash-lite",
 
   STT_MODEL:
     process.env.OPENROUTER_STT_MODEL ||
@@ -20,7 +20,7 @@ const CONFIG = {
 
   AUDIO_FALLBACK_MODEL:
     process.env.OPENROUTER_AUDIO_MODEL ||
-    "openai/whisper-1",
+    "google/gemini-3.1-flash-lite",
 
   BOT_TOKEN: process.env.BOT_TOKEN,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
@@ -426,6 +426,8 @@ async function transcribeAudio(audioBuffer, format) {
 function getSttModels() {
   const models = [
     CONFIG.STT_MODEL,
+    "mistralai/voxtral-mini-transcribe",
+    "openai/gpt-4o-mini-transcribe",
     "openai/whisper-large-v3-turbo",
     "openai/whisper-1"
   ];
