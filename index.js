@@ -12,15 +12,15 @@ const express = require("express");
 const CONFIG = {
   MODEL:
     process.env.OPENROUTER_MODEL ||
-    "google/gemini-3.1-flash-lite",
+    "openai/gpt-4o-mini",
 
   STT_MODEL:
     process.env.OPENROUTER_STT_MODEL ||
-    "qwen/qwen3-asr-flash-2026-02-10",
+    "openai/whisper-large-v3-turbo",
 
   AUDIO_FALLBACK_MODEL:
     process.env.OPENROUTER_AUDIO_MODEL ||
-    "google/gemini-3.1-flash-lite",
+    "thedrummer/cydonia-24b-v4.1",
 
   BOT_TOKEN: process.env.BOT_TOKEN,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
