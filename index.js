@@ -24,7 +24,7 @@ const CONFIG = {
 
   BOT_TOKEN: process.env.BOT_TOKEN,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
-  PORT: process.env.PORT || 3000,
+  PORT: process.env.PORT || 12722,
   STT_LANGUAGE: process.env.OPENROUTER_STT_LANGUAGE,
   MAX_AUDIO_BYTES: Number(process.env.MAX_AUDIO_BYTES || 25 * 1024 * 1024),
   MEMORY_FILE: path.join(__dirname, "memory.json"),
