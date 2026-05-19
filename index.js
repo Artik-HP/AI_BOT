@@ -1,5 +1,4 @@
 require("dotenv").config();
-const { injectSpeedInsights } = require("@vercel/speed-insights");
 console.log("BOT_TOKEN есть?", !!process.env.BOT_TOKEN);
 console.log("ENV путь:", process.cwd());
 
@@ -8,23 +7,32 @@ const path = require("path");
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
 
-// Initialize Vercel Speed Insights
-injectSpeedInsights();
 console.log("Бот запущен");
 
 // 1. System prompt
 const express = require("express");
+const CONFIG = {
+  MODEL:
+    process.env.OPENROUTER_MODEL ||
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const PORT = process.env.PORT || 3000;
-const MODEL = process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
-const STT_MODEL = process.env.OPENROUTER_STT_MODEL || "openai/whisper-large-v3";
-const AUDIO_FALLBACK_MODEL = process.env.OPENROUTER_AUDIO_MODEL || "openai/gpt-4o-audio-preview";
-const STT_LANGUAGE = process.env.OPENROUTER_STT_LANGUAGE;
-const MAX_AUDIO_BYTES = Number(process.env.MAX_AUDIO_BYTES || 25 * 1024 * 1024);
-const MEMORY_FILE = path.join(__dirname, "memory.json");
-const MAX_HISTORY_MESSAGES = 24;
+  STT_MODEL:
+    process.env.OPENROUTER_STT_MODEL ||
+    "openai/whisper-large-v3",
+
+  AUDIO_FALLBACK_MODEL:
+    process.env.OPENROUTER_AUDIO_MODEL ||
+    "openai/gpt-4o-audio-preview",
+
+  BOT_TOKEN: process.env.BOT_TOKEN,
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+  PORT: process.env.PORT || 3000,
+  STT_LANGUAGE: process.env.OPENROUTER_STT_LANGUAGE,
+  MAX_AUDIO_BYTES: Number(process.env.MAX_AUDIO_BYTES || 25 * 1024 * 1024),
+  MEMORY_FILE: path.join(__dirname, "memory.json"),
+};
+
+const MAX_HISTORY_MESSAGES = 50;
 
 const BUTTONS = {
   help: "Помощь",
@@ -71,12 +79,13 @@ const BOT_COMMANDS = [
   { command: "status", description: "Проверить модели и память" },
   { command: "reset", description: "Очистить память этого чата" }
 ];
-
-if (!BOT_TOKEN) {
+{
+if (!CONFIG.BOT_TOKEN) 
   throw new Error("BOT_TOKEN не найден в .env");
+
 }
 
-if (!OPENROUTER_API_KEY) {
+if (!CONFIG.OPENROUTER_API_KEY) {
   throw new Error("OPENROUTER_API_KEY не найден в .env");
 }
 
@@ -99,15 +108,13 @@ role: "system",
 const app = express();
 let chats = loadMemory();
 
-console.log("Bot token loaded:", Boolean(BOT_TOKEN));
-console.log("OpenRouter key loaded:", Boolean(OPENROUTER_API_KEY));
+console.log("Bot token loaded:", Boolean(CONFIG.BOT_TOKEN));
+console.log("OpenRouter key loaded:", Boolean(CONFIG.OPENROUTER_API_KEY));
 console.log("Bot started");
-
-registerBotCommands();
 
 function loadMemory() {
   try {
-    if (!fs.existsSync(MEMORY_FILE)) {
+    if (!fs.existsSync(CONFIG.MEMORY_FILE)) {
       return {};
     }
 
@@ -121,7 +128,7 @@ function loadMemory() {
 
 function saveMemory() {
   try {
-    fs.writeFileSync(MEMORY_FILE, JSON.stringify(chats, null, 2), "utf8");
+    fs.writeFileSync(CONFIG.MEMORY_FILE, JSON.stringify(chats, null, 2), "utf8");
   } catch (error) {
     console.error("Memory save error:", error.message);
   }
@@ -147,12 +154,10 @@ function remember(chatId, message) {
 
   saveMemory();
 }
-
-function registerBotCommands() {
+const bot = new TelegramBot(CONFIG.BOT_TOKEN, { polling: true });
   bot.setMyCommands(BOT_COMMANDS).catch((error) => {
     console.error("Telegram commands setup error:", error.message);
   });
-}
 
 async function sendMainMenu(chatId) {
   await bot.sendMessage(
@@ -193,7 +198,7 @@ async function sendVoiceHelp(chatId) {
       "2. Я скачаю аудио, расшифрую его и отвечу как на текст.",
       "3. Если Telegram или OpenRouter споткнутся, причина будет в консоли.",
       "",
-      `Лимит файла: ${Math.round(MAX_AUDIO_BYTES / 1024 / 1024)} MB.`
+      `Лимит файла: ${Math.round(CONFIG.MAX_AUDIO_BYTES / 1024 / 1024)} MB.`
     ].join("\n"),
     MAIN_KEYBOARD
   );
@@ -206,11 +211,11 @@ async function sendStatus(chatId) {
     chatId,
     [
       "Статус:",
-      `AI-модель: ${MODEL}`,
+      `AI-модель: ${CONFIG.MODEL}`,
       `STT-модели: ${getSttModels().join(", ")}`,
-      `Audio fallback: ${AUDIO_FALLBACK_MODEL}`,
+      `Audio fallback: ${CONFIG.AUDIO_FALLBACK_MODEL}`,
       `Сообщений в памяти чата: ${history.length}/${MAX_HISTORY_MESSAGES}`,
-      `Лимит аудио: ${Math.round(MAX_AUDIO_BYTES / 1024 / 1024)} MB`
+      `Лимит аудио: ${Math.round(CONFIG.MAX_AUDIO_BYTES / 1024 / 1024)} MB`
     ].join("\n"),
     MAIN_KEYBOARD
   );
@@ -296,14 +301,14 @@ async function askAI(chatId, text) {
   const response = await axios.post(
     "https://openrouter.ai/api/v1/chat/completions",
     {
-      model: MODEL,
+      model: CONFIG.MODEL,
       messages,
       temperature: 0.9,
       top_p: 0.95
     },
     {
       headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${CONFIG.OPENROUTER_API_KEY}`,
         "Content-Type": "application/json",
         "HTTP-Referer": process.env.APP_URL || "http://localhost",
         "X-Title": "AI Telegram Bot"
@@ -382,13 +387,13 @@ async function downloadTelegramFile(fileId) {
   const response = await axios.get(fileLink, {
     responseType: "arraybuffer",
     timeout: 60000,
-    maxContentLength: MAX_AUDIO_BYTES,
+    maxContentLength: CONFIG.MAX_AUDIO_BYTES,
     maxBodyLength: MAX_AUDIO_BYTES
   });
 
   const audioBuffer = Buffer.from(response.data);
 
-  if (audioBuffer.length > MAX_AUDIO_BYTES) {
+  if (audioBuffer.length > CONFIG.MAX_AUDIO_BYTES) {
     throw new Error(`Audio file is too large: ${audioBuffer.length} bytes`);
   }
 
@@ -408,10 +413,10 @@ async function transcribeAudio(audioBuffer, format) {
   }
 
   try {
-    console.warn("Trying audio chat fallback:", AUDIO_FALLBACK_MODEL);
+    console.warn("Trying audio chat fallback:", CONFIG.AUDIO_FALLBACK_MODEL);
     return await transcribeWithAudioChat(audioBuffer, format);
   } catch (error) {
-    errors.push({ model: AUDIO_FALLBACK_MODEL, error });
+    errors.push({ model: CONFIG.AUDIO_FALLBACK_MODEL, error });
     console.warn("Audio chat fallback failed:", getErrorDetails(error));
   }
 
@@ -425,7 +430,7 @@ async function transcribeAudio(audioBuffer, format) {
 
 function getSttModels() {
   const models = [
-    STT_MODEL,
+    CONFIG.STT_MODEL,
     "openai/whisper-large-v3-turbo",
     "openai/whisper-1"
   ];
@@ -442,12 +447,12 @@ async function transcribeWithSttEndpoint(audioBuffer, format, model) {
         data: audioBuffer.toString("base64"),
         format
       },
-      ...(STT_LANGUAGE ? { language: STT_LANGUAGE } : {}),
+      ...(CONFIG.STT_LANGUAGE ? { language: CONFIG.STT_LANGUAGE } : {}),
       temperature: 0
     },
     {
       headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${CONFIG.OPENROUTER_API_KEY}`,
         "Content-Type": "application/json",
         "HTTP-Referer": process.env.APP_URL || "http://localhost",
         "X-Title": "AI Telegram Bot"
@@ -471,7 +476,7 @@ async function transcribeWithAudioChat(audioBuffer, format) {
   const response = await axios.post(
     "https://openrouter.ai/api/v1/chat/completions",
     {
-      model: AUDIO_FALLBACK_MODEL,
+      model: CONFIG.AUDIO_FALLBACK_MODEL,
       messages: [
         {
           role: "user",
@@ -494,7 +499,7 @@ async function transcribeWithAudioChat(audioBuffer, format) {
     },
     {
       headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${CONFIG.OPENROUTER_API_KEY}`,
         "Content-Type": "application/json",
         "HTTP-Referer": process.env.APP_URL || "http://localhost",
         "X-Title": "AI Telegram Bot"
@@ -653,9 +658,9 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
   res.json({
     ok: true,
-    model: MODEL,
+    model: CONFIG.MODEL,
     sttModels: getSttModels(),
-    audioFallbackModel: AUDIO_FALLBACK_MODEL,
+    audioFallbackModel: CONFIG.AUDIO_FALLBACK_MODEL,
     chats: Object.keys(chats).length
   });
 });
@@ -665,6 +670,6 @@ function getErrorDetails(error) {
 }
 
 
-app.listen(PORT, () => {
-  console.log(`Web server started on port ${PORT}`);
+app.listen(CONFIG.PORT, () => {
+  console.log(`Web server started on port ${CONFIG.PORT}`);
 });
