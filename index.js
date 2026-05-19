@@ -118,7 +118,7 @@ function loadMemory() {
       return {};
     }
 
-    const raw = fs.readFileSync(MEMORY_FILE, "utf8");
+    const raw = fs.readFileSync(CONFIG.MEMORY_FILE, "utf8");
     return JSON.parse(raw);
   } catch (error) {
     console.error("Memory load error:", error.message);
