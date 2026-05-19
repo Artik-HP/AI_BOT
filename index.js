@@ -1,6 +1,4 @@
 require("dotenv").config();
-console.log("BOT_TOKEN есть?", !!CONFIG.BOT_TOKEN);
-console.log("ENV путь:", process.cwd());
 
 const fs = require("fs");
 const path = require("path");
@@ -33,7 +31,8 @@ const CONFIG = {
 };
 
 const MAX_HISTORY_MESSAGES = 50;
-
+console.log("BOT_TOKEN есть?", !!CONFIG.BOT_TOKEN);
+console.log("ENV путь:", process.cwd());
 const BUTTONS = {
   help: "Помощь",
   status: "Статус",
