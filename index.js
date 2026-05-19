@@ -1,5 +1,5 @@
 require("dotenv").config();
-console.log("BOT_TOKEN есть?", !!process.env.BOT_TOKEN);
+console.log("BOT_TOKEN есть?", !!CONFIG.BOT_TOKEN);
 console.log("ENV путь:", process.cwd());
 
 const fs = require("fs");
