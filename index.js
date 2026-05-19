@@ -14,15 +14,15 @@ const express = require("express");
 const CONFIG = {
   MODEL:
     process.env.OPENROUTER_MODEL ||
-    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "baidu/ernie-4.5-21b-a3b-thinking",
 
   STT_MODEL:
     process.env.OPENROUTER_STT_MODEL ||
-    "openai/whisper-large-v3",
+    "qwen/qwen3-asr-flash-2026-02-10",
 
   AUDIO_FALLBACK_MODEL:
     process.env.OPENROUTER_AUDIO_MODEL ||
-    "openai/gpt-4o-audio-preview",
+    "openai/whisper-1",
 
   BOT_TOKEN: process.env.BOT_TOKEN,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
