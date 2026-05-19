@@ -89,10 +89,6 @@ if (!CONFIG.OPENROUTER_API_KEY) {
   throw new Error("OPENROUTER_API_KEY не найден в .env");
 }
 
-const bot = new TelegramBot(CONFIG.BOT_TOKEN, {
-  polling: true
-}); 
-
 const systemPrompt = {
 role: "system",
   content: [
