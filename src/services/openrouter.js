@@ -13,11 +13,11 @@ const {
   isProbablySameReply
 } = require("./memory");
 
-async function requestAICompletion(messages) {
+async function requestAICompletion(messages, options = {}) {
   const response = await axios.post(
     "https://openrouter.ai/api/v1/chat/completions",
     {
-      model: CONFIG.MODEL,
+      model: options.model || CONFIG.MODEL,
       messages,
       temperature: 1.05,
       top_p: 0.92,
@@ -31,7 +31,9 @@ async function requestAICompletion(messages) {
         "HTTP-Referer": process.env.APP_URL || "http://localhost",
         "X-Title": "AI Telegram Bot"
       },
-      timeout: 60000
+      timeout: options.timeout || 60000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
     }
   );
 
@@ -85,6 +87,135 @@ async function askAI(chatId, text, from) {
   });
 
   return aiReply;
+}
+
+function buildImageTurnMessage(text, imageDataUrl) {
+  return {
+    role: "user",
+    content: [
+      {
+        type: "text",
+        text: [
+          "CURRENT QUESTION. Answer this exact message, not the previous dialog.",
+          "The user attached an image. Use the image itself as primary context.",
+          "",
+          text
+        ].join("\n")
+      },
+      {
+        type: "image_url",
+        image_url: {
+          url: imageDataUrl,
+          detail: "auto"
+        }
+      }
+    ]
+  };
+}
+
+async function askAIWithImage(chatId, text, image, from) {
+  const promptText = text?.trim() || "Describe this image and answer based on it.";
+  const memoryText = text?.trim()
+    ? `[Image attached]\nCaption/request: ${text.trim()}`
+    : "[Image attached]";
+
+  const memory = updatePersonalityMemory(chatId, memoryText, from);
+  const previousAssistantReply = getLastMessageByRole(memory, "assistant");
+  const currentUserMessage = {
+    role: "user",
+    content: memoryText
+  };
+
+  const history = memory.messages.slice(-MAX_HISTORY_MESSAGES);
+  const currentTurn = buildImageTurnMessage(promptText, image.dataUrl);
+  const requestOptions = { model: CONFIG.VISION_MODEL };
+
+  let aiReply = await requestAICompletion([
+    buildSystemPrompt(memory),
+    ...history,
+    currentTurn
+  ], requestOptions);
+
+  if (isProbablySameReply(aiReply, previousAssistantReply)) {
+    aiReply = await requestAICompletion([
+      buildSystemPrompt(memory),
+      buildReplyCorrectionMessage(promptText),
+      ...history.filter((message) => message.role !== "assistant").slice(-6),
+      currentTurn
+    ], requestOptions);
+  }
+
+  if (isProbablySameReply(aiReply, previousAssistantReply)) {
+    aiReply = await requestAICompletion([
+      buildSystemPrompt(memory),
+      buildReplyCorrectionMessage(promptText),
+      currentTurn
+    ], requestOptions);
+  }
+
+  if (!aiReply) {
+    throw new Error("OpenRouter returned an empty image response");
+  }
+
+  remember(chatId, currentUserMessage);
+
+  remember(chatId, {
+    role: "assistant",
+    content: aiReply
+  });
+
+  return aiReply;
+}
+
+function trimTextForSpeech(text) {
+  const normalized = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (normalized.length <= CONFIG.TTS_MAX_CHARS) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, CONFIG.TTS_MAX_CHARS - 3).trim()}...`;
+}
+
+async function synthesizeSpeech(text, options = {}) {
+  const input = trimTextForSpeech(text);
+
+  if (!input) {
+    throw new Error("No text to synthesize");
+  }
+
+  const response = await axios.post(
+    "https://openrouter.ai/api/v1/audio/speech",
+    {
+      model: CONFIG.TTS_MODEL,
+      input,
+      voice: options.voice || CONFIG.TTS_VOICE,
+      response_format: CONFIG.TTS_FORMAT,
+      speed: CONFIG.TTS_SPEED
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${CONFIG.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.APP_URL || "http://localhost",
+        "X-Title": "AI Telegram Bot"
+      },
+      responseType: "arraybuffer",
+      timeout: 120000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
+    }
+  );
+
+  const audioBuffer = Buffer.from(response.data);
+
+  if (!audioBuffer.length) {
+    throw new Error("OpenRouter returned empty speech audio");
+  }
+
+  return audioBuffer;
 }
 
 async function transcribeAudio(audioBuffer, format) {
@@ -213,6 +344,9 @@ async function transcribeWithAudioChat(audioBuffer, format) {
 module.exports = {
   requestAICompletion,
   askAI,
+  askAIWithImage,
+  synthesizeSpeech,
+  trimTextForSpeech,
   transcribeAudio,
   getSttModels
 };

@@ -4,7 +4,7 @@ const {
   claimIncomingMessage,
   enqueueChatTask,
   downloadTelegramFile,
-  sendAIMessage
+  sendAIResponse
 } = require("../services/telegram");
 
 const AUDIO_ERROR_MESSAGE = "Не смог прочитать голосовое сообщение. Попробуй короче или проверь OPENROUTER_STT_MODEL / OPENROUTER_AUDIO_MODEL и доступ к OpenRouter.";
@@ -71,7 +71,7 @@ async function handleAudioMessage(bot, chatId, msg, audio) {
     : transcript;
 
   const aiReply = await askAI(chatId, userText, msg.from);
-  await sendAIMessage(chatId, aiReply);
+  await sendAIResponse(chatId, aiReply, { preferVoice: true });
 }
 
 function registerVoiceHandler(bot) {

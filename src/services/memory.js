@@ -4,6 +4,11 @@ const CONFIG = require("../config");
 const { MAX_HISTORY_MESSAGES, MAX_PERSONAL_NOTES } = CONFIG;
 let users = loadMemory();
 
+function getDefaultVoiceEnabled() {
+  const mode = String(CONFIG.VOICE_REPLY_MODE || "off").toLowerCase();
+  return mode !== "off" && mode !== "text";
+}
+
 function loadMemory() {
   try {
     if (!fs.existsSync(CONFIG.MEMORY_FILE)) {
@@ -50,7 +55,9 @@ function createEmptyMemory() {
     style: "unknown",
     personalNotes: [],
     messageCount: 0,
-    lastSeen: null
+    lastSeen: null,
+    voiceEnabled: getDefaultVoiceEnabled(),
+    ttsVoice: CONFIG.TTS_VOICE
   };
 }
 
@@ -83,6 +90,12 @@ function normalizeUserMemory(value) {
     ? Number(value.messageCount)
     : memory.messages.filter((message) => message?.role === "user").length;
   memory.lastSeen = typeof value.lastSeen === "string" ? value.lastSeen : null;
+  memory.voiceEnabled = typeof value.voiceEnabled === "boolean"
+    ? value.voiceEnabled
+    : memory.voiceEnabled;
+  memory.ttsVoice = typeof value.ttsVoice === "string" && value.ttsVoice.trim()
+    ? value.ttsVoice.trim()
+    : memory.ttsVoice;
 
   return memory;
 }
@@ -431,6 +444,33 @@ function resetMemory(chatId) {
   saveMemory();
 }
 
+function setVoiceEnabled(chatId, enabled) {
+  const memory = getUserMemory(chatId);
+  memory.voiceEnabled = Boolean(enabled);
+  saveMemory();
+  return memory;
+}
+
+function toggleVoiceEnabled(chatId) {
+  const memory = getUserMemory(chatId);
+  memory.voiceEnabled = !memory.voiceEnabled;
+  saveMemory();
+  return memory;
+}
+
+function setTtsVoice(chatId, voice) {
+  const cleanVoice = String(voice || "").trim();
+
+  if (!cleanVoice) {
+    throw new Error("TTS voice is empty");
+  }
+
+  const memory = getUserMemory(chatId);
+  memory.ttsVoice = cleanVoice;
+  saveMemory();
+  return memory;
+}
+
 function getUserCount() {
   return Object.keys(users).length;
 }
@@ -442,6 +482,9 @@ module.exports = {
   getUserMemory,
   remember,
   resetMemory,
+  setVoiceEnabled,
+  toggleVoiceEnabled,
+  setTtsVoice,
   getUserCount,
   updatePersonalityMemory,
   getLastMessageByRole,

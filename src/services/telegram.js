@@ -1,7 +1,13 @@
 const axios = require("axios");
 const TelegramBot = require("node-telegram-bot-api");
 const CONFIG = require("../config");
-const { dedupeRepeatedReply, normalizeForCompare } = require("./memory");
+const { getErrorDetails } = require("../utils/errors");
+const {
+  dedupeRepeatedReply,
+  getUserMemory,
+  normalizeForCompare
+} = require("./memory");
+const { synthesizeSpeech } = require("./openrouter");
 
 const {
   PROCESSED_MESSAGE_TTL_MS,
@@ -12,6 +18,8 @@ const processedMessages = new Set();
 const lastAiReplies = new Map();
 const chatQueues = new Map();
 let bot;
+
+const TELEGRAM_CAPTION_LIMIT = 1024;
 
 function createTelegramBot() {
   bot = new TelegramBot(CONFIG.BOT_TOKEN, { polling: true });
@@ -66,7 +74,81 @@ async function sendAIMessage(chatId, reply) {
     return;
   }
 
+  await sendCleanTextMessage(chatId, cleanReply);
+}
+
+function shouldSendVoiceReply(options = {}) {
+  return options.voiceEnabled !== false;
+}
+
+function getAudioFileOptions() {
+  const format = String(CONFIG.TTS_FORMAT || "mp3").toLowerCase();
+  const contentType = {
+    mp3: "audio/mpeg",
+    pcm: "audio/pcm"
+  }[format] || "application/octet-stream";
+
+  return {
+    filename: `reply.${format}`,
+    contentType
+  };
+}
+
+function buildAudioCaption(text) {
+  const cleanText = String(text || "").trim();
+
+  if (cleanText.length <= TELEGRAM_CAPTION_LIMIT) {
+    return cleanText;
+  }
+
+  return `${cleanText.slice(0, TELEGRAM_CAPTION_LIMIT - 3).trim()}...`;
+}
+
+async function sendCleanTextMessage(chatId, cleanReply) {
   await bot.sendMessage(chatId, cleanReply);
+}
+
+async function sendAIVoiceMessage(chatId, reply) {
+  const cleanReply = dedupeRepeatedReply(reply);
+
+  if (!cleanReply || shouldSkipDuplicateReply(chatId, cleanReply)) {
+    return;
+  }
+
+  try {
+    await bot.sendChatAction(chatId, "upload_audio");
+    const memory = getUserMemory(chatId);
+    const audioBuffer = await synthesizeSpeech(cleanReply, {
+      voice: memory.ttsVoice || CONFIG.TTS_VOICE
+    });
+
+    await bot.sendAudio(
+      chatId,
+      audioBuffer,
+      {
+        caption: buildAudioCaption(cleanReply),
+        title: "AI reply"
+      },
+      getAudioFileOptions()
+    );
+  } catch (error) {
+    const status = error.response?.status;
+    const details = getErrorDetails(error);
+
+    console.error("TTS send error:", status, details);
+    await sendCleanTextMessage(chatId, cleanReply);
+  }
+}
+
+async function sendAIResponse(chatId, reply, options = {}) {
+  const memory = getUserMemory(chatId);
+
+  if (shouldSendVoiceReply({ ...options, voiceEnabled: memory.voiceEnabled })) {
+    await sendAIVoiceMessage(chatId, reply);
+    return;
+  }
+
+  await sendAIMessage(chatId, reply);
 }
 
 function enqueueChatTask(chatId, task) {
@@ -85,22 +167,37 @@ function enqueueChatTask(chatId, task) {
   return next;
 }
 
-async function downloadTelegramFile(fileId) {
+function getDownloadOptions(options) {
+  if (typeof options === "number") {
+    return {
+      maxBytes: options,
+      fileLabel: "File"
+    };
+  }
+
+  return {
+    maxBytes: Number(options?.maxBytes || CONFIG.MAX_AUDIO_BYTES),
+    fileLabel: options?.fileLabel || "File"
+  };
+}
+
+async function downloadTelegramFile(fileId, options) {
+  const { maxBytes, fileLabel } = getDownloadOptions(options);
   const fileLink = await bot.getFileLink(fileId);
   const response = await axios.get(fileLink, {
     responseType: "arraybuffer",
     timeout: 60000,
-    maxContentLength: CONFIG.MAX_AUDIO_BYTES,
-    maxBodyLength: CONFIG.MAX_AUDIO_BYTES
+    maxContentLength: maxBytes,
+    maxBodyLength: maxBytes
   });
 
-  const audioBuffer = Buffer.from(response.data);
+  const fileBuffer = Buffer.from(response.data);
 
-  if (audioBuffer.length > CONFIG.MAX_AUDIO_BYTES) {
-    throw new Error(`Audio file is too large: ${audioBuffer.length} bytes`);
+  if (fileBuffer.length > maxBytes) {
+    throw new Error(`${fileLabel} file is too large: ${fileBuffer.length} bytes`);
   }
 
-  return audioBuffer;
+  return fileBuffer;
 }
 
 module.exports = {
@@ -108,6 +205,8 @@ module.exports = {
   getTelegramBot,
   claimIncomingMessage,
   sendAIMessage,
+  sendAIVoiceMessage,
+  sendAIResponse,
   enqueueChatTask,
   downloadTelegramFile
 };

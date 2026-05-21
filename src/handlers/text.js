@@ -2,7 +2,7 @@ const { askAI } = require("../services/openrouter");
 const {
   claimIncomingMessage,
   enqueueChatTask,
-  sendAIMessage
+  sendAIResponse
 } = require("../services/telegram");
 
 const AI_ERROR_MESSAGE = "AI сейчас не ответил. Проверь OPENROUTER_API_KEY, модель или доступ к серверу.";
@@ -28,7 +28,7 @@ function registerTextHandler(bot, commands) {
       try {
         await bot.sendChatAction(chatId, "typing");
         const aiReply = await askAI(chatId, text, msg.from);
-        await sendAIMessage(chatId, aiReply);
+        await sendAIResponse(chatId, aiReply);
       } catch (error) {
         const status = error.response?.status;
         const details = error.response?.data || error.message;
