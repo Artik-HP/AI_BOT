@@ -2,6 +2,7 @@ const CONFIG = require("./config");
 const { getSttModels } = require("./services/openrouter");
 const {
   MAX_HISTORY_MESSAGES,
+  MAX_STORED_MESSAGES,
   getUserMemory,
   resetMemory,
   setTtsVoice,
@@ -357,7 +358,9 @@ async function sendStatus(chatId) {
       `TTS model: ${CONFIG.TTS_MODEL}`,
       `TTS voice: ${memory.ttsVoice || CONFIG.TTS_VOICE}`,
       `Voice replies: ${memory.voiceEnabled ? "on" : "off"}`,
-      `Сообщений в памяти чата: ${memory.messages.length}/${MAX_HISTORY_MESSAGES}`,
+      `Сообщений сохранено: ${memory.messages.length}/${MAX_STORED_MESSAGES}`,
+      `В запрос к AI идет последних сообщений: ${Math.min(memory.messages.length, MAX_HISTORY_MESSAGES)}/${MAX_HISTORY_MESSAGES}`,
+      `Долгая память: ${memory.summary ? `${memory.summary.length} символов` : "пусто"}`,
       `Mood: ${memory.mood}`,
       `Trust: ${memory.trust}`,
       `Style: ${memory.style}`,

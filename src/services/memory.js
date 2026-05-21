@@ -1,7 +1,14 @@
 const fs = require("fs");
 const CONFIG = require("../config");
 
-const { MAX_HISTORY_MESSAGES, MAX_PERSONAL_NOTES } = CONFIG;
+const {
+  MAX_HISTORY_MESSAGES,
+  MAX_STORED_MESSAGES,
+  MAX_MEMORY_SUMMARY_CHARS,
+  MAX_MESSAGE_CONTENT_CHARS,
+  MAX_PERSONAL_NOTES
+} = CONFIG;
+const MAX_STORED_CHAT_MESSAGES = Math.max(MAX_HISTORY_MESSAGES, MAX_STORED_MESSAGES);
 let users = loadMemory();
 
 function getDefaultVoiceEnabled() {
@@ -57,16 +64,150 @@ function createEmptyMemory() {
     messageCount: 0,
     lastSeen: null,
     voiceEnabled: getDefaultVoiceEnabled(),
-    ttsVoice: CONFIG.TTS_VOICE
+    ttsVoice: CONFIG.TTS_VOICE,
+    summary: ""
   };
+}
+
+function trimText(text, maxLength = MAX_MESSAGE_CONTENT_CHARS) {
+  const cleanText = String(text || "").trim();
+  const safeMaxLength = Math.max(32, Number(maxLength) || MAX_MESSAGE_CONTENT_CHARS);
+
+  if (cleanText.length <= safeMaxLength) {
+    return cleanText;
+  }
+
+  return `${cleanText.slice(0, safeMaxLength - 20).trim()}... [trimmed]`;
+}
+
+function normalizeMessageContent(content) {
+  if (typeof content === "string") {
+    return trimText(content);
+  }
+
+  if (Array.isArray(content)) {
+    return trimText(content
+      .map((part) => {
+        if (typeof part === "string") {
+          return part;
+        }
+
+        if (typeof part?.text === "string") {
+          return part.text;
+        }
+
+        if (typeof part?.type === "string") {
+          return `[${part.type}]`;
+        }
+
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n"));
+  }
+
+  return trimText(content == null ? "" : String(content));
+}
+
+function normalizeStoredMessage(message) {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const role = ["user", "assistant", "system"].includes(message.role)
+    ? message.role
+    : null;
+  const content = normalizeMessageContent(message.content);
+
+  if (!role || !content) {
+    return null;
+  }
+
+  return { role, content };
+}
+
+function normalizeMessageList(messages) {
+  return messages
+    .map(normalizeStoredMessage)
+    .filter(Boolean);
+}
+
+function trimMemorySummary(summary) {
+  const cleanSummary = String(summary || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+
+  if (cleanSummary.length <= MAX_MEMORY_SUMMARY_CHARS) {
+    return cleanSummary;
+  }
+
+  const tail = cleanSummary.slice(-MAX_MEMORY_SUMMARY_CHARS).trimStart();
+  const firstLineBreak = tail.indexOf("\n");
+
+  return firstLineBreak > 0
+    ? tail.slice(firstLineBreak + 1).trimStart()
+    : tail;
+}
+
+function formatSummaryLine(message) {
+  const speaker = message.role === "assistant" ? "Assistant" : "User";
+  const content = String(message.content || "").replace(/\s+/g, " ").trim();
+  return `${speaker}: ${content}`;
+}
+
+function appendMessagesToSummary(memory, messages) {
+  const addition = messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .map(formatSummaryLine)
+    .filter(Boolean)
+    .join("\n");
+
+  if (!addition) {
+    return;
+  }
+
+  memory.summary = trimMemorySummary([memory.summary, addition].filter(Boolean).join("\n"));
+}
+
+function buildLongTermMemoryText(memory) {
+  const exactHistoryStart = Math.max(0, memory.messages.length - MAX_HISTORY_MESSAGES);
+  const olderStoredMessages = memory.messages.slice(0, exactHistoryStart);
+  const olderStoredText = olderStoredMessages
+    .map(formatSummaryLine)
+    .join("\n");
+
+  return trimMemorySummary([memory.summary, olderStoredText].filter(Boolean).join("\n"));
+}
+
+function setStoredMessages(memory, messages) {
+  const normalizedMessages = normalizeMessageList(messages);
+  const overflowCount = Math.max(0, normalizedMessages.length - MAX_STORED_CHAT_MESSAGES);
+
+  if (overflowCount > 0) {
+    appendMessagesToSummary(memory, normalizedMessages.slice(0, overflowCount));
+  }
+
+  memory.messages = normalizedMessages.slice(-MAX_STORED_CHAT_MESSAGES);
+}
+
+function trimStoredMessages(memory) {
+  if (memory.messages.length <= MAX_STORED_CHAT_MESSAGES) {
+    return;
+  }
+
+  const overflowCount = memory.messages.length - MAX_STORED_CHAT_MESSAGES;
+  const overflow = memory.messages.splice(0, overflowCount);
+  appendMessagesToSummary(memory, overflow);
 }
 
 function normalizeUserMemory(value) {
   const memory = createEmptyMemory();
 
   if (Array.isArray(value)) {
-    memory.messages = value.slice(-MAX_HISTORY_MESSAGES);
-    memory.messageCount = value.filter((message) => message?.role === "user").length;
+    const normalizedMessages = normalizeMessageList(value);
+    setStoredMessages(memory, normalizedMessages);
+    memory.messageCount = normalizedMessages.filter((message) => message.role === "user").length;
     return memory;
   }
 
@@ -75,9 +216,11 @@ function normalizeUserMemory(value) {
   }
 
   memory.mood = typeof value.mood === "string" ? value.mood : memory.mood;
-  memory.messages = Array.isArray(value.messages)
-    ? value.messages.slice(-MAX_HISTORY_MESSAGES)
+  memory.summary = trimMemorySummary(value.summary || value.conversationSummary || "");
+  const normalizedMessages = Array.isArray(value.messages)
+    ? normalizeMessageList(value.messages)
     : [];
+  setStoredMessages(memory, normalizedMessages);
   memory.nickname = typeof value.nickname === "string" && value.nickname.trim()
     ? value.nickname.trim()
     : null;
@@ -88,7 +231,7 @@ function normalizeUserMemory(value) {
     : [];
   memory.messageCount = Number.isFinite(Number(value.messageCount))
     ? Number(value.messageCount)
-    : memory.messages.filter((message) => message?.role === "user").length;
+    : normalizedMessages.filter((message) => message.role === "user").length;
   memory.lastSeen = typeof value.lastSeen === "string" ? value.lastSeen : null;
   memory.voiceEnabled = typeof value.voiceEnabled === "boolean"
     ? value.voiceEnabled
@@ -114,12 +257,14 @@ function getUserMemory(chatId) {
 
 function remember(chatId, message) {
   const memory = getUserMemory(chatId);
-  memory.messages.push(message);
+  const normalizedMessage = normalizeStoredMessage(message);
 
-  if (memory.messages.length > MAX_HISTORY_MESSAGES) {
-    memory.messages = memory.messages.slice(-MAX_HISTORY_MESSAGES);
+  if (!normalizedMessage) {
+    return;
   }
 
+  memory.messages.push(normalizedMessage);
+  trimStoredMessages(memory);
   saveMemory();
 }
 
@@ -358,6 +503,7 @@ function buildSystemPrompt(memory) {
     : memory.trust <= -3
       ? "low"
       : "normal";
+  const longTermMemory = buildLongTermMemoryText(memory);
 
   return {
     role: "system",
@@ -379,7 +525,12 @@ function buildSystemPrompt(memory) {
       `Ник/имя: ${memory.nickname || "неизвестно"}`,
       `Стиль общения человека: ${memory.style}`,
       `Сообщений от этого чата: ${memory.messageCount}`,
-      `Личные заметки: ${memory.personalNotes.length ? memory.personalNotes.join("; ") : "пока нет"}`
+      `Личные заметки: ${memory.personalNotes.length ? memory.personalNotes.join("; ") : "пока нет"}`,
+      "",
+      "Use long-term chat memory together with the recent exact messages. If they conflict, trust the recent exact messages.",
+      longTermMemory
+        ? `Long-term chat memory from older messages:\n${longTermMemory}`
+        : "Long-term chat memory from older messages: empty"
     ].join("\n")
   };
 }
@@ -477,6 +628,8 @@ function getUserCount() {
 
 module.exports = {
   MAX_HISTORY_MESSAGES,
+  MAX_STORED_MESSAGES: MAX_STORED_CHAT_MESSAGES,
+  MAX_MEMORY_SUMMARY_CHARS,
   loadMemory,
   saveMemory,
   getUserMemory,

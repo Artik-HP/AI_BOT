@@ -1,5 +1,10 @@
 const path = require("path");
 
+function readPositiveNumber(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 const CONFIG = {
   MODEL:
     process.env.OPENROUTER_MODEL ||
@@ -39,7 +44,10 @@ const CONFIG = {
   MAX_IMAGE_BYTES: Number(process.env.MAX_IMAGE_BYTES || 10 * 1024 * 1024),
   MEMORY_FILE: path.join(__dirname, "..", "memory.json"),
 
-  MAX_HISTORY_MESSAGES: 20,
+  MAX_HISTORY_MESSAGES: readPositiveNumber("MAX_HISTORY_MESSAGES", 60),
+  MAX_STORED_MESSAGES: readPositiveNumber("MAX_STORED_MESSAGES", 300),
+  MAX_MEMORY_SUMMARY_CHARS: readPositiveNumber("MAX_MEMORY_SUMMARY_CHARS", 6000),
+  MAX_MESSAGE_CONTENT_CHARS: readPositiveNumber("MAX_MESSAGE_CONTENT_CHARS", 4000),
   MAX_PERSONAL_NOTES: 12,
   PROCESSED_MESSAGE_TTL_MS: 10 * 60 * 1000,
   DUPLICATE_REPLY_TTL_MS: 15 * 1000
