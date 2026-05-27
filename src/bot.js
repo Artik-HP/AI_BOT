@@ -16,6 +16,10 @@ function start() {
   const { registerVoiceHandler } = require("./handlers/voice");
   const { getSttModels } = require("./services/openrouter");
   const { getUserCount } = require("./services/memory");
+  const {
+    getAccountAssistantStatus,
+    startAccountAssistant
+  } = require("./services/accountAssistant");
 
   const app = express();
 
@@ -28,6 +32,9 @@ function start() {
   registerVoiceHandler(bot);
   registerPhotoHandler(bot);
   registerTextHandler(bot, commands);
+  startAccountAssistant(bot).catch((error) => {
+    logger.error("Account assistant start error:", error.message);
+  });
 
   bot.on("polling_error", (error) => {
     console.error("Telegram polling error:", error.message);
@@ -47,6 +54,7 @@ function start() {
       voiceReplyMode: CONFIG.VOICE_REPLY_MODE,
       sttModels: getSttModels(),
       audioFallbackModel: CONFIG.AUDIO_FALLBACK_MODEL,
+      accountAssistant: getAccountAssistantStatus(),
       users: getUserCount()
     });
   });

@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "telegram:session": "node scripts/create-telegram-session.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -16,6 +17,7 @@
     "axios": "^1.16.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "node-telegram-bot-api": "^0.67.0"
+    "node-telegram-bot-api": "^0.67.0",
+    "telegram": "^2.26.22"
   }
 }

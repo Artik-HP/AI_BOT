@@ -67,6 +67,11 @@ const BOT_COMMANDS = [
   { command: "voices", description: "Выбрать голос бота" },
   { command: "voice_set", description: "Изменить голос: /voice_set nova" },
   { command: "status", description: "Проверить модели и память" },
+  { command: "account_status", description: "Статус Telegram-ассистента аккаунта" },
+  { command: "account_pending", description: "Черновики ответов для аккаунта" },
+  { command: "account_send", description: "Отправить черновик: /account_send id" },
+  { command: "account_drop", description: "Отклонить черновик: /account_drop id" },
+  { command: "account_reply", description: "Отправить свой текст: /account_reply id текст" },
   { command: "reset", description: "Очистить память этого чата" }
 ];
 
@@ -173,6 +178,11 @@ async function sendHelp(chatId) {
       "/voices - выбрать голос кнопками",
       "/voice_set nova - изменить голос командой",
       "/status - модели, память и лимиты",
+      "/account_status - статус ассистента аккаунта",
+      "/account_pending - активные черновики ответов",
+      "/account_send id - отправить черновик",
+      "/account_drop id - отклонить черновик",
+      "/account_reply id текст - отправить свой текст",
       "/reset - очистить память этого чата",
       "",
       "Кнопки делают то же самое, только без ручного набора команд."

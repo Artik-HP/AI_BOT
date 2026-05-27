@@ -5,6 +5,23 @@ function readPositiveNumber(name, fallback) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+function readBoolean(name, fallback = false) {
+  const value = process.env[name];
+
+  if (value == null || value === "") {
+    return fallback;
+  }
+
+  return ["1", "true", "yes", "y", "on"].includes(String(value).trim().toLowerCase());
+}
+
+function readList(name) {
+  return String(process.env[name] || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
 const CONFIG = {
   MODEL:
     process.env.OPENROUTER_MODEL ||
@@ -42,7 +59,9 @@ const CONFIG = {
   STT_LANGUAGE: process.env.OPENROUTER_STT_LANGUAGE,
   MAX_AUDIO_BYTES: Number(process.env.MAX_AUDIO_BYTES || 25 * 1024 * 1024),
   MAX_IMAGE_BYTES: Number(process.env.MAX_IMAGE_BYTES || 10 * 1024 * 1024),
-  MEMORY_FILE: path.join(__dirname, "..", "memory.json"),
+  MEMORY_FILE: process.env.MEMORY_FILE
+    ? path.resolve(process.env.MEMORY_FILE)
+    : path.join(__dirname, "..", "memory.json"),
 
   MAX_HISTORY_MESSAGES: readPositiveNumber("MAX_HISTORY_MESSAGES", 60),
   MAX_STORED_MESSAGES: readPositiveNumber("MAX_STORED_MESSAGES", 300),
@@ -50,7 +69,25 @@ const CONFIG = {
   MAX_MESSAGE_CONTENT_CHARS: readPositiveNumber("MAX_MESSAGE_CONTENT_CHARS", 4000),
   MAX_PERSONAL_NOTES: 12,
   PROCESSED_MESSAGE_TTL_MS: 10 * 60 * 1000,
-  DUPLICATE_REPLY_TTL_MS: 15 * 1000
+  DUPLICATE_REPLY_TTL_MS: 15 * 1000,
+
+  ACCOUNT_ASSISTANT_ENABLED: readBoolean("ACCOUNT_ASSISTANT_ENABLED", false),
+  ACCOUNT_ASSISTANT_MODE: process.env.ACCOUNT_ASSISTANT_MODE || "approval",
+  ACCOUNT_ASSISTANT_OWNER_CHAT_ID:
+    process.env.ACCOUNT_ASSISTANT_OWNER_CHAT_ID ||
+    process.env.BOT_OWNER_CHAT_ID ||
+    process.env.OWNER_CHAT_ID,
+  ACCOUNT_ASSISTANT_PRIVATE_ONLY: readBoolean("ACCOUNT_ASSISTANT_PRIVATE_ONLY", true),
+  ACCOUNT_ASSISTANT_ALLOW_CHATS: readList("ACCOUNT_ASSISTANT_ALLOW_CHATS"),
+  ACCOUNT_ASSISTANT_BLOCK_CHATS: readList("ACCOUNT_ASSISTANT_BLOCK_CHATS"),
+  ACCOUNT_ASSISTANT_REPLY_DELAY_MS: readPositiveNumber("ACCOUNT_ASSISTANT_REPLY_DELAY_MS", 1200),
+  ACCOUNT_ASSISTANT_MIN_INTERVAL_MS: readPositiveNumber("ACCOUNT_ASSISTANT_MIN_INTERVAL_MS", 30000),
+  ACCOUNT_ASSISTANT_DRAFT_TTL_MS: readPositiveNumber("ACCOUNT_ASSISTANT_DRAFT_TTL_MS", 30 * 60 * 1000),
+  ACCOUNT_ASSISTANT_MAX_TEXT_CHARS: readPositiveNumber("ACCOUNT_ASSISTANT_MAX_TEXT_CHARS", 1200),
+  ACCOUNT_ASSISTANT_PROMPT: process.env.ACCOUNT_ASSISTANT_PROMPT || "",
+  TELEGRAM_API_ID: Number(process.env.TELEGRAM_API_ID || 0),
+  TELEGRAM_API_HASH: process.env.TELEGRAM_API_HASH,
+  TELEGRAM_STRING_SESSION: process.env.TELEGRAM_STRING_SESSION
 };
 
 function validateConfig() {

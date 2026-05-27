@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const CONFIG = require("../config");
 
 const {
@@ -9,33 +10,109 @@ const {
   MAX_PERSONAL_NOTES
 } = CONFIG;
 const MAX_STORED_CHAT_MESSAGES = Math.max(MAX_HISTORY_MESSAGES, MAX_STORED_MESSAGES);
+const MEMORY_BACKUP_FILE = `${CONFIG.MEMORY_FILE}.bak`;
+const SHUTDOWN_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
+const SIGNAL_EXIT_CODES = {
+  SIGINT: 130,
+  SIGTERM: 143,
+  SIGHUP: 129
+};
+let shutdownHandlersRegistered = false;
 let users = loadMemory();
+registerMemoryShutdownHandlers();
 
 function getDefaultVoiceEnabled() {
   const mode = String(CONFIG.VOICE_REPLY_MODE || "off").toLowerCase();
   return mode !== "off" && mode !== "text";
 }
 
-function loadMemory() {
-  try {
-    if (!fs.existsSync(CONFIG.MEMORY_FILE)) {
-      return {};
-    }
+function ensureMemoryDirectory() {
+  fs.mkdirSync(path.dirname(CONFIG.MEMORY_FILE), { recursive: true });
+}
 
-    const raw = fs.readFileSync(CONFIG.MEMORY_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    return normalizeMemoryStore(parsed);
-  } catch (error) {
-    console.error("Memory load error:", error.message);
+function readMemoryFile(filePath) {
+  const raw = fs.readFileSync(filePath, "utf8");
+
+  if (!raw.trim()) {
     return {};
+  }
+
+  return normalizeMemoryStore(JSON.parse(raw));
+}
+
+function tryLoadMemoryFile(filePath, label) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    return readMemoryFile(filePath);
+  } catch (error) {
+    console.error(`Memory load error from ${label}:`, error.message);
+    return null;
   }
 }
 
+function loadMemory() {
+  const primary = tryLoadMemoryFile(CONFIG.MEMORY_FILE, "primary file");
+
+  if (primary) {
+    return primary;
+  }
+
+  const backup = tryLoadMemoryFile(MEMORY_BACKUP_FILE, "backup file");
+
+  if (backup) {
+    console.warn("Loaded memory from backup file.");
+    return backup;
+  }
+
+  return {};
+}
+
 function saveMemory() {
+  const tempFile = `${CONFIG.MEMORY_FILE}.${process.pid}.${Date.now()}.tmp`;
+
   try {
-    fs.writeFileSync(CONFIG.MEMORY_FILE, JSON.stringify(users, null, 2), "utf8");
+    ensureMemoryDirectory();
+
+    if (fs.existsSync(CONFIG.MEMORY_FILE)) {
+      try {
+        readMemoryFile(CONFIG.MEMORY_FILE);
+        fs.copyFileSync(CONFIG.MEMORY_FILE, MEMORY_BACKUP_FILE);
+      } catch (error) {
+        console.error("Memory backup skipped:", error.message);
+      }
+    }
+
+    fs.writeFileSync(tempFile, JSON.stringify(users, null, 2), "utf8");
+    fs.renameSync(tempFile, CONFIG.MEMORY_FILE);
   } catch (error) {
     console.error("Memory save error:", error.message);
+
+    try {
+      if (fs.existsSync(tempFile)) {
+        fs.unlinkSync(tempFile);
+      }
+    } catch (cleanupError) {
+      console.error("Memory temp cleanup error:", cleanupError.message);
+    }
+  }
+}
+
+function registerMemoryShutdownHandlers() {
+  if (shutdownHandlersRegistered) {
+    return;
+  }
+
+  shutdownHandlersRegistered = true;
+  process.once("beforeExit", saveMemory);
+
+  for (const signal of SHUTDOWN_SIGNALS) {
+    process.once(signal, () => {
+      saveMemory();
+      process.exit(SIGNAL_EXIT_CODES[signal] || 0);
+    });
   }
 }
 
