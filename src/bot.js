@@ -53,9 +53,7 @@ function start() {
       ttsVoice: CONFIG.TTS_VOICE,
       voiceReplyMode: CONFIG.VOICE_REPLY_MODE,
       sttModels: getSttModels(),
-      audioFallbackModel: CONFIG.AUDIO_FALLBACK_MODEL,
-      accountAssistant: getAccountAssistantStatus(),
-      users: getUserCount()
+      audioFallbackModel: CONFIG.AUDIO_FALLBACK_MODEL,пше
     });
   });
 
