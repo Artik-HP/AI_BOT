@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "telegram:session": "node scripts/create-telegram-session.js",
+    "userbot": "node scripts/userbot.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -20,11 +21,4 @@
     "node-telegram-bot-api": "^0.67.0",
     "telegram": "^2.26.22"
   }
-}
-
-"scripts": {
-  "start": "node index.js",
-  "telegram:session": "node scripts/create-telegram-session.js",
-  "userbot": "node scripts/userbot.js",
-  "test": "echo \"Error: no test specified\" && exit 1"
 }
