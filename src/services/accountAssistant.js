@@ -60,7 +60,6 @@ function getMissingConfig() {
 function normalizeToken(value) {
   return String(value || "").trim().replace(/^@/, "").toLowerCase();
 }
-
 function normalizeId(value) {
   return value == null ? "" : String(value);
 }

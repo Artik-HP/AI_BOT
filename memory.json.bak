@@ -257,18 +257,26 @@
       {
         "role": "assistant",
         "content": "Извини, но я не могу помочь с этим."
+      },
+      {
+        "role": "user",
+        "content": "привет"
+      },
+      {
+        "role": "assistant",
+        "content": "Привет! Чё как, чем могу помочь?"
       }
     ],
     "nickname": "Тёма",
     "trust": 0,
-    "style": "talkative",
+    "style": "short",
     "personalNotes": [
       "User name/nickname: Тёма",
       "User enjoys jokes and chaotic humor.",
       "User expects strong JavaScript and coding help."
     ],
-    "messageCount": 33,
-    "lastSeen": "2026-05-31T10:47:52.419Z",
+    "messageCount": 34,
+    "lastSeen": "2026-05-31T11:06:53.539Z",
     "voiceEnabled": false,
     "ttsVoice": "nova",
     "summary": ""
@@ -352,6 +360,28 @@
       {
         "role": "user",
         "content": "Привет."
+      },
+      {
+        "role": "assistant",
+        "content": "Привет! Как дела?"
+      }
+    ],
+    "nickname": null,
+    "trust": 0,
+    "style": "unknown",
+    "personalNotes": [],
+    "messageCount": 0,
+    "lastSeen": null,
+    "voiceEnabled": true,
+    "ttsVoice": "nova",
+    "summary": ""
+  },
+  "account:6419489836": {
+    "mood": "neutral",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Ага"
       },
       {
         "role": "assistant",

@@ -14,6 +14,7 @@ const {
   DUPLICATE_REPLY_TTL_MS
 } = CONFIG;
 
+const { NewMessage } = require("telegram/events");
 const processedMessages = new Set();
 const lastAiReplies = new Map();
 const chatQueues = new Map();
@@ -77,6 +78,20 @@ async function sendAIMessage(chatId, reply) {
   await sendCleanTextMessage(chatId, cleanReply);
 }
 
+client.addEventHandler(async (event) => {
+  const message = event.message;
+  const text = message.message || "";
+
+  if (text === ".ping") {
+    await message.reply({ message: "pong" });
+  }
+
+  if (text.startsWith(".say ")) {
+    const replyText = text.slice(5);
+    await message.reply({ message: replyText });
+  }
+}, new NewMessage({}));
+
 function shouldSendVoiceReply(options = {}) {
   return options.voiceEnabled !== false;
 }
@@ -108,7 +123,7 @@ async function sendCleanTextMessage(chatId, cleanReply) {
   await bot.sendMessage(chatId, cleanReply);
 }
 
-async function sendAIVoiceMessage(chatId, reply) {
+function sendAIVoiceMessage(chatId, reply) {
   const cleanReply = dedupeRepeatedReply(reply);
 
   if (!cleanReply || shouldSkipDuplicateReply(chatId, cleanReply)) {
@@ -150,6 +165,7 @@ async function sendAIResponse(chatId, reply, options = {}) {
 
   await sendAIMessage(chatId, reply);
 }
+
 
 function enqueueChatTask(chatId, task) {
   const key = String(chatId);
