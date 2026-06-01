@@ -14,7 +14,6 @@ const {
   DUPLICATE_REPLY_TTL_MS
 } = CONFIG;
 
-const { NewMessage } = require("telegram/events");
 const processedMessages = new Set();
 const lastAiReplies = new Map();
 const chatQueues = new Map();
@@ -78,20 +77,6 @@ async function sendAIMessage(chatId, reply) {
   await sendCleanTextMessage(chatId, cleanReply);
 }
 
-client.addEventHandler(async (event) => {
-  const message = event.message;
-  const text = message.message || "";
-
-  if (text === ".ping") {
-    await message.reply({ message: "pong" });
-  }
-
-  if (text.startsWith(".say ")) {
-    const replyText = text.slice(5);
-    await message.reply({ message: replyText });
-  }
-}, new NewMessage({}));
-
 function shouldSendVoiceReply(options = {}) {
   return options.voiceEnabled !== false;
 }
@@ -120,37 +105,15 @@ function buildAudioCaption(text) {
 }
 
 async function sendCleanTextMessage(chatId, cleanReply) {
-  bot.on("message", async (msg) => {
-
-  if (!msg.text) return;
-
-  const chatId = String(msg.chat.id);
-
-  const MY_USERNAME = "API";
-const TARGET_USERNAME = "artik";
-
-if (msg.from?.username === bot_API_TL_bot) return;
-if (msg.from?.username !== artik_ai_helper_bot) return;
-});
+  await bot.sendMessage(chatId, cleanReply);
 }
 
-function sendAIVoiceMessage(chatId, reply) {
+async function sendAIVoiceMessage(chatId, reply) {
   const cleanReply = dedupeRepeatedReply(reply);
 
   if (!cleanReply || shouldSkipDuplicateReply(chatId, cleanReply)) {
     return;
   }
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-await sleep(10000);
-
-await botInstance.sendMessage(
-  msg.chat.id,
-  answer
-);
-
-}
 
   try {
     await bot.sendChatAction(chatId, "upload_audio");
