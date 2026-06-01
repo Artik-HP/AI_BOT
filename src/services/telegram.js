@@ -120,7 +120,18 @@ function buildAudioCaption(text) {
 }
 
 async function sendCleanTextMessage(chatId, cleanReply) {
-  await bot.sendMessage(chatId, cleanReply);
+  bot.on("message", async (msg) => {
+
+  if (!msg.text) return;
+
+  const chatId = String(msg.chat.id);
+
+  const MY_USERNAME = "API";
+const TARGET_USERNAME = "artik";
+
+if (msg.from?.username === bot_API_TL_bot) return;
+if (msg.from?.username !== artik_ai_helper_bot) return;
+});
 }
 
 function sendAIVoiceMessage(chatId, reply) {
@@ -129,6 +140,17 @@ function sendAIVoiceMessage(chatId, reply) {
   if (!cleanReply || shouldSkipDuplicateReply(chatId, cleanReply)) {
     return;
   }
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+await sleep(10000);
+
+await botInstance.sendMessage(
+  msg.chat.id,
+  answer
+);
+
+}
 
   try {
     await bot.sendChatAction(chatId, "upload_audio");
