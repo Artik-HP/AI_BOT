@@ -1,6 +1,10 @@
 const CONFIG = require("./config");
 const { getSttModels } = require("./services/openrouter");
 const {
+  getBotToBotStatus,
+  sendMessageToBot
+} = require("./services/telegram");
+const {
   MAX_HISTORY_MESSAGES,
   MAX_STORED_MESSAGES,
   getUserMemory,
@@ -11,6 +15,16 @@ const {
 } = require("./services/memory");
 
 let bot;
+
+function onUserText(regexp, callback) {
+  bot.onText(regexp, async (msg, match) => {
+    if (msg.from?.is_bot) {
+      return;
+    }
+
+    await callback(msg, match);
+  });
+}
 
 const BUTTONS = {
   help: "Помощь",
@@ -72,6 +86,8 @@ const BOT_COMMANDS = [
   { command: "account_send", description: "Отправить черновик: /account_send id" },
   { command: "account_drop", description: "Отклонить черновик: /account_drop id" },
   { command: "account_reply", description: "Отправить свой текст: /account_reply id текст" },
+  { command: "bot_status", description: "Статус общения с другими ботами" },
+  { command: "bot_send", description: "Написать боту: /bot_send @username текст" },
   { command: "reset", description: "Очистить память этого чата" }
 ];
 
@@ -82,51 +98,59 @@ function initCommands(telegramBot) {
     console.error("Telegram commands setup error:", error.message);
   });
 
-  bot.onText(/^\/start(?:@\w+)?(?:\s|$)/, async (msg) => {
+  onUserText(/^\/start(?:@\w+)?(?:\s|$)/, async (msg) => {
     const chatId = msg.chat.id;
     return sendMainMenu(chatId);
   });
 
-  bot.onText(/^\/help(?:@\w+)?(?:\s|$)/, async (msg) => {
+  onUserText(/^\/help(?:@\w+)?(?:\s|$)/, async (msg) => {
     const chatId = msg.chat.id;
     return sendHelp(chatId);
   });
 
-  bot.onText(/^\/reset(?:@\w+)?(?:\s|$)/, async (msg) => {
+  onUserText(/^\/reset(?:@\w+)?(?:\s|$)/, async (msg) => {
     const chatId = msg.chat.id;
     return resetChatMemory(chatId);
   });
 
-  bot.onText(/^\/menu(?:@\w+)?(?:\s|$)/, async (msg) => {
+  onUserText(/^\/menu(?:@\w+)?(?:\s|$)/, async (msg) => {
     await sendMainMenu(msg.chat.id);
   });
 
-  bot.onText(/^\/voice(?:@\w+)?(?:\s|$)/, async (msg) => {
+  onUserText(/^\/voice(?:@\w+)?(?:\s|$)/, async (msg) => {
     await sendVoiceHelp(msg.chat.id);
   });
 
-  bot.onText(/^\/voice_on(?:@\w+)?(?:\s|$)/, async (msg) => {
+  onUserText(/^\/voice_on(?:@\w+)?(?:\s|$)/, async (msg) => {
     await setVoiceMode(msg.chat.id, true);
   });
 
-  bot.onText(/^\/voice_off(?:@\w+)?(?:\s|$)/, async (msg) => {
+  onUserText(/^\/voice_off(?:@\w+)?(?:\s|$)/, async (msg) => {
     await setVoiceMode(msg.chat.id, false);
   });
 
-  bot.onText(/^\/voice_toggle(?:@\w+)?(?:\s|$)/, async (msg) => {
+  onUserText(/^\/voice_toggle(?:@\w+)?(?:\s|$)/, async (msg) => {
     await toggleVoiceMode(msg.chat.id);
   });
 
-  bot.onText(/^\/voices(?:@\w+)?(?:\s|$)/, async (msg) => {
+  onUserText(/^\/voices(?:@\w+)?(?:\s|$)/, async (msg) => {
     await sendVoicePicker(msg.chat.id);
   });
 
-  bot.onText(/^\/voice_set(?:@\w+)?(?:\s|$)/, async (msg) => {
+  onUserText(/^\/voice_set(?:@\w+)?(?:\s|$)/, async (msg) => {
     await setVoiceFromCommand(msg.chat.id, msg.text);
   });
 
-  bot.onText(/^\/status(?:@\w+)?(?:\s|$)/, async (msg) => {
+  onUserText(/^\/status(?:@\w+)?(?:\s|$)/, async (msg) => {
     await sendStatus(msg.chat.id);
+  });
+
+  onUserText(/^\/bot_status(?:@\w+)?(?:\s|$)/, async (msg) => {
+    await sendBotToBotStatus(msg.chat.id);
+  });
+
+  onUserText(/^\/bot_send(?:@\w+)?(?:\s|$)/, async (msg) => {
+    await sendBotMessageFromCommand(msg.chat.id, msg.text);
   });
 
   bot.on("callback_query", async (query) => {
@@ -183,6 +207,8 @@ async function sendHelp(chatId) {
       "/account_send id - отправить черновик",
       "/account_drop id - отклонить черновик",
       "/account_reply id текст - отправить свой текст",
+      "/bot_status - статус общения с другими ботами",
+      "/bot_send @username текст - написать другому боту",
       "/reset - очистить память этого чата",
       "",
       "Кнопки делают то же самое, только без ручного набора команд."
@@ -357,6 +383,7 @@ async function setBotVoice(chatId, voice) {
 
 async function sendStatus(chatId) {
   const memory = getUserMemory(chatId);
+  const botToBot = getBotToBotStatus();
 
   await bot.sendMessage(
     chatId,
@@ -375,10 +402,76 @@ async function sendStatus(chatId) {
       `Trust: ${memory.trust}`,
       `Style: ${memory.style}`,
       `Nickname: ${memory.nickname || "-"}`,
+      `Bot-to-bot: ${botToBot.enabled ? "on" : "off"}`,
       `Лимит аудио: ${Math.round(CONFIG.MAX_AUDIO_BYTES / 1024 / 1024)} MB`
     ].join("\n"),
     MAIN_KEYBOARD
   );
+}
+
+function isBotToBotOwner(chatId) {
+  return (
+    CONFIG.BOT_TO_BOT_OWNER_CHAT_ID &&
+    String(chatId) === String(CONFIG.BOT_TO_BOT_OWNER_CHAT_ID)
+  );
+}
+
+async function ensureBotToBotOwner(chatId) {
+  if (!CONFIG.BOT_TO_BOT_OWNER_CHAT_ID) {
+    await bot.sendMessage(chatId, "Укажи BOT_TO_BOT_OWNER_CHAT_ID в переменных окружения.");
+    return false;
+  }
+
+  if (!isBotToBotOwner(chatId)) {
+    await bot.sendMessage(chatId, "Эта команда доступна только владельцу бота.");
+    return false;
+  }
+
+  return true;
+}
+
+async function sendBotToBotStatus(chatId) {
+  if (!await ensureBotToBotOwner(chatId)) {
+    return;
+  }
+
+  const status = getBotToBotStatus();
+
+  await bot.sendMessage(chatId, [
+    "Общение с другими ботами:",
+    `Режим: ${status.enabled ? "включен" : "выключен"}`,
+    `Username этого бота: ${status.username ? `@${status.username}` : "загружается"}`,
+    `Разрешенные боты: ${status.allowBots.length ? status.allowBots.join(", ") : "все"}`,
+    `Лимит ходов: ${status.maxTurns} за ${Math.round(status.windowMs / 1000)} сек.`,
+    `Минимальная пауза между ходами: ${status.minIntervalMs} мс.`,
+    "",
+    "Для личных сообщений включи Bot-to-Bot Communication Mode в @BotFather у обоих ботов.",
+    "Начать разговор: /bot_send @username текст"
+  ].join("\n"));
+}
+
+async function sendBotMessageFromCommand(chatId, text) {
+  if (!await ensureBotToBotOwner(chatId)) {
+    return;
+  }
+
+  const match = String(text || "").match(
+    /^\/bot_send(?:@\w+)?\s+(@?[a-z0-9_]{5,32})\s+([\s\S]+)$/i
+  );
+
+  if (!match) {
+    await bot.sendMessage(chatId, "Используй: /bot_send @username текст");
+    return;
+  }
+
+  const username = match[1].replace(/^@/, "");
+
+  try {
+    await sendMessageToBot(username, match[2]);
+    await bot.sendMessage(chatId, `Сообщение отправлено @${username}.`);
+  } catch (error) {
+    await bot.sendMessage(chatId, `Не отправил: ${error.response?.body?.description || error.message}`);
+  }
 }
 
 async function resetChatMemory(chatId) {
@@ -495,6 +588,8 @@ module.exports = {
   sendVoiceSettings,
   sendVoicePicker,
   sendStatus,
+  sendBotToBotStatus,
+  sendBotMessageFromCommand,
   resetChatMemory,
   handleMenuButton,
   handleInlineMenu,

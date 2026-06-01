@@ -9,7 +9,7 @@ function start() {
 
   CONFIG.validateConfig();
 
-  const { createTelegramBot } = require("./services/telegram");
+  const { createTelegramBot, getBotToBotStatus } = require("./services/telegram");
   const commands = require("./commands");
   const { registerTextHandler } = require("./handlers/text");
   const { registerPhotoHandler } = require("./handlers/photo");
@@ -55,6 +55,7 @@ function start() {
       sttModels: getSttModels(),
       audioFallbackModel: CONFIG.AUDIO_FALLBACK_MODEL,
       users: getUserCount(),
+      botToBot: getBotToBotStatus(),
       accountAssistant: getAccountAssistantStatus()
     });
   });

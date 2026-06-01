@@ -17,12 +17,29 @@ const {
 const processedMessages = new Set();
 const lastAiReplies = new Map();
 const chatQueues = new Map();
+const botConversationWindows = new Map();
 let bot;
+let botIdentity;
 
 const TELEGRAM_CAPTION_LIMIT = 1024;
+const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 function createTelegramBot() {
   bot = new TelegramBot(CONFIG.BOT_TOKEN, { polling: true });
+
+  if (typeof bot.getMe === "function") {
+    bot.getMe()
+      .then((identity) => {
+        botIdentity = {
+          id: String(identity.id),
+          username: normalizeTelegramUsername(identity.username)
+        };
+      })
+      .catch((error) => {
+        console.error("Telegram getMe error:", getErrorDetails(error));
+      });
+  }
+
   return bot;
 }
 
@@ -48,6 +65,126 @@ function claimIncomingMessage(msg) {
   processedMessages.add(key);
   setTimeout(() => processedMessages.delete(key), PROCESSED_MESSAGE_TTL_MS).unref?.();
   return true;
+}
+
+function normalizeTelegramUsername(username) {
+  const cleanUsername = String(username || "").trim().replace(/^@/, "").toLowerCase();
+  return /^[a-z0-9_]{5,32}$/.test(cleanUsername) ? cleanUsername : null;
+}
+
+function isAllowedBotIdentity(identity = {}) {
+  if (!CONFIG.BOT_TO_BOT_ALLOW_BOTS.length) {
+    return true;
+  }
+
+  const id = String(identity.id || "").trim();
+  const username = normalizeTelegramUsername(identity.username);
+
+  return CONFIG.BOT_TO_BOT_ALLOW_BOTS.some((allowedBot) => {
+    const allowedId = String(allowedBot || "").trim();
+    const allowedUsername = normalizeTelegramUsername(allowedBot);
+    return (id && allowedId === id) || (username && allowedUsername === username);
+  });
+}
+
+function isBotMessageDirectedAtThisBot(msg) {
+  if (msg.chat?.type === "private") {
+    return true;
+  }
+
+  const replyToId = String(msg.reply_to_message?.from?.id || "");
+
+  if (botIdentity?.id && replyToId === botIdentity.id) {
+    return true;
+  }
+
+  if (!botIdentity?.username) {
+    return false;
+  }
+
+  return new RegExp(`(^|\\W)@${botIdentity.username}(?=$|\\W)`, "i").test(String(msg.text || ""));
+}
+
+function claimIncomingBotMessage(msg) {
+  if (!msg.from?.is_bot) {
+    return true;
+  }
+
+  if (
+    !CONFIG.BOT_TO_BOT_ENABLED ||
+    String(msg.from.id || "") === botIdentity?.id ||
+    !isAllowedBotIdentity(msg.from) ||
+    !isBotMessageDirectedAtThisBot(msg)
+  ) {
+    return false;
+  }
+
+  const now = Date.now();
+  const key = `${msg.chat?.id || "unknown"}:${msg.from.id || msg.from.username || "bot"}`;
+  let window = botConversationWindows.get(key);
+
+  if (!window || now - window.startedAt >= CONFIG.BOT_TO_BOT_WINDOW_MS) {
+    window = { count: 0, startedAt: now };
+    botConversationWindows.set(key, window);
+    setTimeout(() => {
+      if (botConversationWindows.get(key) === window) {
+        botConversationWindows.delete(key);
+      }
+    }, CONFIG.BOT_TO_BOT_WINDOW_MS).unref?.();
+  }
+
+  if (window.count >= CONFIG.BOT_TO_BOT_MAX_TURNS) {
+    console.warn(`Bot-to-bot turn limit reached for ${key}`);
+    return false;
+  }
+
+  if (
+    window.lastAcceptedAt &&
+    now - window.lastAcceptedAt < CONFIG.BOT_TO_BOT_MIN_INTERVAL_MS
+  ) {
+    console.warn(`Bot-to-bot rate limit reached for ${key}`);
+    return false;
+  }
+
+  window.count += 1;
+  window.lastAcceptedAt = now;
+  return true;
+}
+
+function getBotToBotStatus() {
+  return {
+    enabled: Boolean(CONFIG.BOT_TO_BOT_ENABLED),
+    username: botIdentity?.username || null,
+    identityLoaded: Boolean(botIdentity?.id),
+    allowBots: CONFIG.BOT_TO_BOT_ALLOW_BOTS,
+    maxTurns: CONFIG.BOT_TO_BOT_MAX_TURNS,
+    windowMs: CONFIG.BOT_TO_BOT_WINDOW_MS,
+    minIntervalMs: CONFIG.BOT_TO_BOT_MIN_INTERVAL_MS,
+    ownerChatIdConfigured: Boolean(CONFIG.BOT_TO_BOT_OWNER_CHAT_ID)
+  };
+}
+
+async function sendMessageToBot(username, text) {
+  if (!CONFIG.BOT_TO_BOT_ENABLED) {
+    throw new Error("Bot-to-bot communication is disabled");
+  }
+
+  const cleanUsername = normalizeTelegramUsername(username);
+  const cleanText = String(text || "").trim();
+
+  if (!cleanUsername) {
+    throw new Error("Invalid Telegram bot username");
+  }
+
+  if (!cleanText) {
+    throw new Error("Message text is empty");
+  }
+
+  if (!isAllowedBotIdentity({ username: cleanUsername })) {
+    throw new Error(`@${cleanUsername} is not in BOT_TO_BOT_ALLOW_BOTS`);
+  }
+
+  return getTelegramBot().sendMessage(`@${cleanUsername}`, cleanText.slice(0, TELEGRAM_MESSAGE_LIMIT));
 }
 
 function shouldSkipDuplicateReply(chatId, reply) {
@@ -142,8 +279,9 @@ async function sendAIVoiceMessage(chatId, reply) {
 
 async function sendAIResponse(chatId, reply, options = {}) {
   const memory = getUserMemory(chatId);
+  const voiceEnabled = options.voiceEnabled ?? memory.voiceEnabled;
 
-  if (shouldSendVoiceReply({ ...options, voiceEnabled: memory.voiceEnabled })) {
+  if (shouldSendVoiceReply({ ...options, voiceEnabled })) {
     await sendAIVoiceMessage(chatId, reply);
     return;
   }
@@ -205,6 +343,9 @@ module.exports = {
   createTelegramBot,
   getTelegramBot,
   claimIncomingMessage,
+  claimIncomingBotMessage,
+  getBotToBotStatus,
+  sendMessageToBot,
   sendAIMessage,
   sendAIVoiceMessage,
   sendAIResponse,

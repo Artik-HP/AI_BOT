@@ -62,3 +62,34 @@ Owner commands in the regular bot chat:
 ```
 
 Keep `TELEGRAM_STRING_SESSION` private. It is an authorized Telegram account session.
+
+## Bot-to-bot communication
+
+Telegram supports bot-to-bot messages when Bot-to-Bot Communication Mode is enabled in `@BotFather`.
+Enable the mode for this bot and for every bot that should receive private messages from it.
+
+Recommended Render environment variables:
+
+```env
+BOT_TO_BOT_ENABLED=true
+BOT_TO_BOT_OWNER_CHAT_ID=123456789
+
+# Optional comma-separated allowlist. Leave empty to accept any bot.
+BOT_TO_BOT_ALLOW_BOTS=reviewer_bot,planner_bot
+
+# Stops accidental endless reply loops.
+BOT_TO_BOT_MAX_TURNS=6
+BOT_TO_BOT_WINDOW_MS=120000
+BOT_TO_BOT_MIN_INTERVAL_MS=2000
+```
+
+Owner commands in the regular bot chat:
+
+```text
+/bot_status
+/bot_send @other_bot hello
+```
+
+Incoming private messages from allowed bots are answered automatically. In groups, the bot only
+answers another bot when the message mentions its username or replies directly to one of its messages.
+Another bot can explicitly start a group conversation with `/bot_chat@your_bot hello`.
