@@ -81,13 +81,25 @@ const BOT_COMMANDS = [
   { command: "voices", description: "Выбрать голос бота" },
   { command: "voice_set", description: "Изменить голос: /voice_set nova" },
   { command: "status", description: "Проверить модели и память" },
+  { command: "account_help", description: "Список команд аккаунт-ассистента" },
   { command: "account_status", description: "Статус Telegram-ассистента аккаунта" },
+  { command: "account_config", description: "Показать настройки аккаунт-ассистента" },
   { command: "account_pending", description: "Черновики ответов для аккаунта" },
   { command: "account_send", description: "Отправить черновик: /account_send id" },
   { command: "account_drop", description: "Отклонить черновик: /account_drop id" },
   { command: "account_reply", description: "Отправить свой текст: /account_reply id текст" },
+  { command: "account_redraft", description: "Обновить draft AI: /account_redraft id" },
+  { command: "account_message", description: "Написать от аккаунта: /account_message chatId текст" },
+  { command: "account_mode", description: "Показать или сменить режим" },
+  { command: "account_private", description: "Включить/выключить private-only" },
+  { command: "account_allow", description: "Добавить разрешённый чат" },
+  { command: "account_unallow", description: "Убрать разрешённый чат" },
+  { command: "account_block", description: "Добавить заблокированный чат" },
+  { command: "account_unblock", description: "Убрать заблокированный чат" },
+  { command: "account_enable", description: "Включить аккаунт-ассистента" },
+  { command: "account_disable", description: "Отключить аккаунт-ассистента" },
   { command: "bot_status", description: "Статус общения с другими ботами" },
-  { command: "bot_send", description: "Написать боту: /bot_send @username текст" },
+  { command: "bot_send", description: "Написать целевому боту: /bot_send текст" },
   { command: "reset", description: "Очистить память этого чата" }
 ];
 
@@ -202,13 +214,24 @@ async function sendHelp(chatId) {
       "/voices - выбрать голос кнопками",
       "/voice_set nova - изменить голос командой",
       "/status - модели, память и лимиты",
+      "/account_help - показать команды аккаунт-ассистента",
       "/account_status - статус ассистента аккаунта",
+      "/account_config - настройки аккаунт-ассистента",
       "/account_pending - активные черновики ответов",
       "/account_send id - отправить черновик",
       "/account_drop id - отклонить черновик",
       "/account_reply id текст - отправить свой текст",
+      "/account_redraft id - получить новый AI-черновик",
+      "/account_message @username текст - отправить сообщение от аккаунта",
+      "/account_mode approval|auto|dry-run - сменить режим",
+      "/account_private true|false - личные чаты только/все",
+      "/account_allow @username - добавить разрешённый чат",
+      "/account_block @username - добавить заблокированный чат",
+      "/account_enable - включить аккаунт-ассистента",
+      "/account_disable - выключить аккаунт-ассистента",
       "/bot_status - статус общения с другими ботами",
-      "/bot_send @username текст - написать другому боту",
+      "/bot_send текст - написать целевому боту",
+      "/bot_send @username текст - написать указанному боту",
       "/reset - очистить память этого чата",
       "",
       "Кнопки делают то же самое, только без ручного набора команд."
@@ -403,6 +426,8 @@ async function sendStatus(chatId) {
       `Style: ${memory.style}`,
       `Nickname: ${memory.nickname || "-"}`,
       `Bot-to-bot: ${botToBot.enabled ? "on" : "off"}`,
+      `Bot-to-bot chat: ${botToBot.chatId || "-"}`,
+      `Bot-to-bot target: ${botToBot.targetBotUsername ? `@${botToBot.targetBotUsername}` : "-"}`,
       `Лимит аудио: ${Math.round(CONFIG.MAX_AUDIO_BYTES / 1024 / 1024)} MB`
     ].join("\n"),
     MAIN_KEYBOARD
@@ -441,12 +466,14 @@ async function sendBotToBotStatus(chatId) {
     "Общение с другими ботами:",
     `Режим: ${status.enabled ? "включен" : "выключен"}`,
     `Username этого бота: ${status.username ? `@${status.username}` : "загружается"}`,
+    `Чат для диалога: ${status.chatId || "не задан"}`,
+    `Целевой бот: ${status.targetBotUsername ? `@${status.targetBotUsername}` : "не задан"}`,
     `Разрешенные боты: ${status.allowBots.length ? status.allowBots.join(", ") : "все"}`,
     `Лимит ходов: ${status.maxTurns} за ${Math.round(status.windowMs / 1000)} сек.`,
     `Минимальная пауза между ходами: ${status.minIntervalMs} мс.`,
     "",
     "Для личных сообщений включи Bot-to-Bot Communication Mode в @BotFather у обоих ботов.",
-    "Начать разговор: /bot_send @username текст"
+    "Начать разговор: /bot_send текст или /bot_send @username текст"
   ].join("\n"));
 }
 
@@ -455,19 +482,33 @@ async function sendBotMessageFromCommand(chatId, text) {
     return;
   }
 
-  const match = String(text || "").match(
-    /^\/bot_send(?:@\w+)?\s+(@?[a-z0-9_]{5,32})\s+([\s\S]+)$/i
+  const status = getBotToBotStatus();
+  const args = String(text || "").trim().split(/\s+/).slice(1).join(" ").trim();
+  const explicitTarget = args.match(/^(@[a-z0-9_]{5,32})\s+([\s\S]+)$/i);
+  const legacyTarget = args.match(/^([a-z0-9_]{5,32})\s+([\s\S]+)$/i);
+  const knownLegacyTarget = legacyTarget && (
+    legacyTarget[1].toLowerCase() === status.targetBotUsername ||
+    status.allowBots.map((allowedBot) => String(allowedBot).replace(/^@/, "").toLowerCase())
+      .includes(legacyTarget[1].toLowerCase())
   );
+  const username = explicitTarget
+    ? explicitTarget[1].replace(/^@/, "")
+    : knownLegacyTarget
+      ? legacyTarget[1]
+      : status.targetBotUsername;
+  const message = explicitTarget
+    ? explicitTarget[2].trim()
+    : knownLegacyTarget
+      ? legacyTarget[2].trim()
+      : args;
 
-  if (!match) {
-    await bot.sendMessage(chatId, "Используй: /bot_send @username текст");
+  if (!username || !message) {
+    await bot.sendMessage(chatId, "Используй: /bot_send текст или /bot_send @username текст");
     return;
   }
 
-  const username = match[1].replace(/^@/, "");
-
   try {
-    await sendMessageToBot(username, match[2]);
+    await sendMessageToBot(username, message);
     await bot.sendMessage(chatId, `Сообщение отправлено @${username}.`);
   } catch (error) {
     await bot.sendMessage(chatId, `Не отправил: ${error.response?.body?.description || error.message}`);

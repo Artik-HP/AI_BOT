@@ -6,5 +6,6 @@
     "telegram:session": "node scripts/create-telegram-session.js",
     "userbot": "node scripts/userbot.js",
     "test": "echo \"Error: no test specified\" && exit 1"
-  }
+  },
+  "powershell_instructions": "# Replace the placeholder information for the following variables:\n$deviceip = '<device ip address>'\n$zipfile = 'PowerShell-7.6.2-win-arm64.zip'\n$downloadfolder = 'C:\\Users\\Administrator\\Downloads'\n# The download location is local to the device.\n# There should be enough space for the zip file and the unzipped contents.\n\n# Create PowerShell session to target device\nSet-Item -Path WSMan:\\localhost\\Client\\TrustedHosts $deviceip\n$S = New-PSSession -ComputerName $deviceIp -Credential Administrator\n# Copy the ZIP package to the device\nCopy-Item $zipfile -Destination $downloadfolder -ToSession $S\n\n#Connect to the device and expand the archive\nEnter-PSSession $S\nSet-Location C:\\Users\\Administrator\\Downloads\nExpand-Archive .\\PowerShell-7.6.2-win-arm64.zip\n\n# Set up remoting to PowerShell 7\nSet-Location .\\PowerShell-7.6.2-win-arm64\n# Be sure to use the -PowerShellHome parameter otherwise it tries to create a new\n# endpoint with Windows PowerShell 5.1\n.\\Install-PowerShellRemoting.ps1 -PowerShellHome ."
 }

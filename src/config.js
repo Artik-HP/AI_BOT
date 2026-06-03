@@ -77,6 +77,11 @@ const CONFIG = {
     process.env.BOT_OWNER_CHAT_ID ||
     process.env.OWNER_CHAT_ID ||
     process.env.ACCOUNT_ASSISTANT_OWNER_CHAT_ID,
+  BOT_TO_BOT_CHAT_ID: process.env.BOT_TO_BOT_CHAT_ID || process.env.CHAT_ID,
+  BOT_TO_BOT_TARGET_BOT_USERNAME:
+    process.env.BOT_TO_BOT_TARGET_BOT_USERNAME ||
+    process.env.BOT_TO_BOT_TARGET_USERNAME ||
+    "",
   BOT_TO_BOT_ALLOW_BOTS: readList("BOT_TO_BOT_ALLOW_BOTS"),
   BOT_TO_BOT_MAX_TURNS: readPositiveNumber("BOT_TO_BOT_MAX_TURNS", 6),
   BOT_TO_BOT_WINDOW_MS: readPositiveNumber("BOT_TO_BOT_WINDOW_MS", 2 * 60 * 1000),

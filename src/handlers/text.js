@@ -2,6 +2,7 @@ const { askAI } = require("../services/openrouter");
 const {
   claimIncomingMessage,
   claimIncomingBotMessage,
+  getBotToBotReplyOptions,
   enqueueChatTask,
   sendAIResponse
 } = require("../services/telegram");
@@ -43,7 +44,7 @@ function registerTextHandler(bot, commands) {
       try {
         await bot.sendChatAction(chatId, "typing");
         const aiReply = await askAI(chatId, aiText, msg.from);
-        await sendAIResponse(chatId, aiReply, isBotMessage ? { voiceEnabled: false } : {});
+        await sendAIResponse(chatId, aiReply, isBotMessage ? getBotToBotReplyOptions(msg) : {});
       } catch (error) {
         const status = error.response?.status;
         const details = error.response?.data || error.message;
