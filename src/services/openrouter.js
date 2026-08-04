@@ -168,57 +168,6 @@ async function askAIWithImage(chatId, text, image, from) {
   return aiReply;
 }
 
-function trimTextForSpeech(text) {
-  const normalized = String(text || "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (normalized.length <= CONFIG.TTS_MAX_CHARS) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, CONFIG.TTS_MAX_CHARS - 3).trim()}...`;
-}
-
-async function synthesizeSpeech(text, options = {}) {
-  const input = trimTextForSpeech(text);
-
-  if (!input) {
-    throw new Error("No text to synthesize");
-  }
-
-  const response = await axios.post(
-    "https://openrouter.ai/api/v1/audio/speech",
-    {
-      model: CONFIG.TTS_MODEL,
-      input,
-      voice: options.voice || CONFIG.TTS_VOICE,
-      response_format: CONFIG.TTS_FORMAT,
-      speed: CONFIG.TTS_SPEED
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${CONFIG.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.APP_URL || "http://localhost",
-        "X-Title": "AI Telegram Bot"
-      },
-      responseType: "arraybuffer",
-      timeout: 120000,
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
-    }
-  );
-
-  const audioBuffer = Buffer.from(response.data);
-
-  if (!audioBuffer.length) {
-    throw new Error("OpenRouter returned empty speech audio");
-  }
-
-  return audioBuffer;
-}
-
 async function transcribeAudio(audioBuffer, format) {
   const errors = [];
 
@@ -487,8 +436,6 @@ module.exports = {
   askAI,
   askAIWithImage,
   draftAccountReply,
-  synthesizeSpeech,
-  trimTextForSpeech,
   transcribeAudio,
   getSttModels
 };

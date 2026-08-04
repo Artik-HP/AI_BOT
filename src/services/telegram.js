@@ -4,10 +4,8 @@ const CONFIG = require("../config");
 const { getErrorDetails } = require("../utils/errors");
 const {
   dedupeRepeatedReply,
-  getUserMemory,
   normalizeForCompare
 } = require("./memory");
-const { synthesizeSpeech } = require("./openrouter");
 
 const {
   PROCESSED_MESSAGE_TTL_MS,
@@ -21,11 +19,11 @@ const botConversationWindows = new Map();
 let bot;
 let botIdentity;
 
-const TELEGRAM_CAPTION_LIMIT = 1024;
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 function createTelegramBot() {
   bot = new TelegramBot(CONFIG.BOT_TOKEN, { polling: true });
+  attachOutgoingMessageLogger(bot);
 
   if (typeof bot.getMe === "function") {
     bot.getMe()
@@ -41,6 +39,42 @@ function createTelegramBot() {
   }
 
   return bot;
+}
+
+function formatOutgoingText(text) {
+  if (typeof text === "string") {
+    return text;
+  }
+
+  try {
+    return JSON.stringify(text);
+  } catch (error) {
+    return String(text);
+  }
+}
+
+function logOutgoingMessage(chatId, text) {
+  console.log("================================");
+  console.log("Ответ бота");
+  console.log("Chat ID:", chatId);
+  console.log("Текст:", formatOutgoingText(text));
+  console.log("================================");
+}
+
+function attachOutgoingMessageLogger(telegramBot) {
+  if (telegramBot.__outgoingMessageLoggerAttached) {
+    return;
+  }
+
+  const originalSendMessage = telegramBot.sendMessage.bind(telegramBot);
+
+  telegramBot.sendMessage = async (...args) => {
+    const result = await originalSendMessage(...args);
+    logOutgoingMessage(args[0], args[1]);
+    return result;
+  };
+
+  telegramBot.__outgoingMessageLoggerAttached = true;
 }
 
 function getTelegramBot() {
@@ -282,7 +316,6 @@ function getBotToBotReplyOptions(msg) {
   }
 
   return {
-    voiceEnabled: false,
     replyToMessageId: msg.message_id,
     targetUsername: msg.from.username
   };
@@ -298,79 +331,12 @@ async function sendAIMessage(chatId, reply, options = {}) {
   await sendCleanTextMessage(chatId, cleanReply, options);
 }
 
-function shouldSendVoiceReply(options = {}) {
-  return options.voiceEnabled !== false;
-}
-
-function getAudioFileOptions() {
-  const format = String(CONFIG.TTS_FORMAT || "mp3").toLowerCase();
-  const contentType = {
-    mp3: "audio/mpeg",
-    pcm: "audio/pcm"
-  }[format] || "application/octet-stream";
-
-  return {
-    filename: `reply.${format}`,
-    contentType
-  };
-}
-
-function buildAudioCaption(text) {
-  const cleanText = String(text || "").trim();
-
-  if (cleanText.length <= TELEGRAM_CAPTION_LIMIT) {
-    return cleanText;
-  }
-
-  return `${cleanText.slice(0, TELEGRAM_CAPTION_LIMIT - 3).trim()}...`;
-}
-
 async function sendCleanTextMessage(chatId, cleanReply, options = {}) {
   const text = prefixBotMention(cleanReply, options.targetUsername).slice(0, TELEGRAM_MESSAGE_LIMIT);
   await bot.sendMessage(chatId, text, buildSendMessageOptions(options));
 }
 
-async function sendAIVoiceMessage(chatId, reply, options = {}) {
-  const cleanReply = dedupeRepeatedReply(reply);
-
-  if (!cleanReply || shouldSkipDuplicateReply(chatId, cleanReply)) {
-    return;
-  }
-
-  try {
-    await bot.sendChatAction(chatId, "upload_audio");
-    const memory = getUserMemory(chatId);
-    const audioBuffer = await synthesizeSpeech(cleanReply, {
-      voice: memory.ttsVoice || CONFIG.TTS_VOICE
-    });
-
-    await bot.sendAudio(
-      chatId,
-      audioBuffer,
-      {
-        caption: buildAudioCaption(cleanReply),
-        title: "AI reply"
-      },
-      getAudioFileOptions()
-    );
-  } catch (error) {
-    const status = error.response?.status;
-    const details = getErrorDetails(error);
-
-    console.error("TTS send error:", status, details);
-    await sendCleanTextMessage(chatId, cleanReply, options);
-  }
-}
-
 async function sendAIResponse(chatId, reply, options = {}) {
-  const memory = getUserMemory(chatId);
-  const voiceEnabled = options.voiceEnabled ?? memory.voiceEnabled;
-
-  if (shouldSendVoiceReply({ ...options, voiceEnabled })) {
-    await sendAIVoiceMessage(chatId, reply, options);
-    return;
-  }
-
   await sendAIMessage(chatId, reply, options);
 }
 
@@ -433,7 +399,6 @@ module.exports = {
   getBotToBotStatus,
   sendMessageToBot,
   sendAIMessage,
-  sendAIVoiceMessage,
   sendAIResponse,
   enqueueChatTask,
   downloadTelegramFile

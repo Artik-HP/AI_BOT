@@ -18,7 +18,17 @@ function getAIText(text, isBotMessage) {
 }
 
 function registerTextHandler(bot, commands) {
-  bot.on("message", async (msg) => {
+bot.on("message", async (msg) => {
+
+    console.log("================================");
+    console.log("📨 Новое сообщение");
+    console.log("ID:", msg.from?.id);
+    console.log("Имя:", msg.from?.first_name);
+    console.log("Username:", msg.from?.username);
+    console.log("Chat ID:", msg.chat?.id);
+    console.log("Текст:", msg.text);
+    console.log("================================");
+
     const chatId = msg.chat.id;
     const text = msg.text?.trim();
     const isBotMessage = Boolean(msg.from?.is_bot);

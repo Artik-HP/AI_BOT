@@ -76,10 +76,6 @@ MAX_AUDIO_BYTES=26214400
 OPENROUTER_MODEL=openai/gpt-4o-mini
 OPENROUTER_STT_MODEL=openai/whisper-large-v3-turbo
 OPENROUTER_AUDIO_MODEL=thedrummer/cydonia-24b-v4.1
-OPENROUTER_TTS_MODEL=openai/gpt-4o-mini-tts-2025-12-15
-OPENROUTER_TTS_VOICE=nova
-OPENROUTER_TTS_VOICES=alloy,echo,fable,onyx,nova,shimmer
-VOICE_REPLY_MODE=always
 ```
 
 ### Настройки аккаунт-ассистента
@@ -185,9 +181,6 @@ npm run telegram:session
 - `/help` — помощь;
 - `/menu` — открыть меню;
 - `/voice` — информация о голосовом вводе;
-- `/voice_on` / `/voice_off` / `/voice_toggle` — управление голосовыми ответами;
-- `/voices` — выбор голоса;
-- `/voice_set` — задать голос командой;
 - `/status` — статус модели и памяти;
 - `/reset` — очистить память чата.
 

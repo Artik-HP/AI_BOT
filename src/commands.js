@@ -8,10 +8,7 @@ const {
   MAX_HISTORY_MESSAGES,
   MAX_STORED_MESSAGES,
   getUserMemory,
-  resetMemory,
-  setTtsVoice,
-  setVoiceEnabled,
-  toggleVoiceEnabled
+  resetMemory
 } = require("./services/memory");
 
 let bot;
@@ -30,8 +27,6 @@ const BUTTONS = {
   help: "Помощь",
   status: "Статус",
   voice: "Голосовые",
-  voiceToggle: "Вкл/выкл голос",
-  voiceChange: "Сменить голос",
   reset: "Очистить память",
   menu: "Меню"
 };
@@ -41,7 +36,6 @@ const MAIN_KEYBOARD = {
     keyboard: [
       [{ text: BUTTONS.help }, { text: BUTTONS.status }],
       [{ text: BUTTONS.voice }, { text: BUTTONS.reset }],
-      [{ text: BUTTONS.voiceToggle }, { text: BUTTONS.voiceChange }],
       [{ text: BUTTONS.menu }]
     ],
     resize_keyboard: true,
@@ -61,10 +55,6 @@ const INLINE_MENU = {
         { text: BUTTONS.voice, callback_data: "menu:voice" },
         { text: BUTTONS.reset, callback_data: "menu:reset" }
       ],
-      [
-        { text: BUTTONS.voiceToggle, callback_data: "menu:voice_toggle" },
-        { text: BUTTONS.voiceChange, callback_data: "menu:voice_picker" }
-      ],
       [{ text: BUTTONS.menu, callback_data: "menu:main" }]
     ]
   }
@@ -75,11 +65,6 @@ const BOT_COMMANDS = [
   { command: "menu", description: "Показать красивые кнопки" },
   { command: "help", description: "Что умеет бот" },
   { command: "voice", description: "Как работают голосовые" },
-  { command: "voice_on", description: "Включить голосовые ответы бота" },
-  { command: "voice_off", description: "Выключить голосовые ответы бота" },
-  { command: "voice_toggle", description: "Переключить голосовые ответы" },
-  { command: "voices", description: "Выбрать голос бота" },
-  { command: "voice_set", description: "Изменить голос: /voice_set nova" },
   { command: "status", description: "Проверить модели и память" },
   { command: "account_help", description: "Список команд аккаунт-ассистента" },
   { command: "account_status", description: "Статус Telegram-ассистента аккаунта" },
@@ -131,26 +116,6 @@ function initCommands(telegramBot) {
 
   onUserText(/^\/voice(?:@\w+)?(?:\s|$)/, async (msg) => {
     await sendVoiceHelp(msg.chat.id);
-  });
-
-  onUserText(/^\/voice_on(?:@\w+)?(?:\s|$)/, async (msg) => {
-    await setVoiceMode(msg.chat.id, true);
-  });
-
-  onUserText(/^\/voice_off(?:@\w+)?(?:\s|$)/, async (msg) => {
-    await setVoiceMode(msg.chat.id, false);
-  });
-
-  onUserText(/^\/voice_toggle(?:@\w+)?(?:\s|$)/, async (msg) => {
-    await toggleVoiceMode(msg.chat.id);
-  });
-
-  onUserText(/^\/voices(?:@\w+)?(?:\s|$)/, async (msg) => {
-    await sendVoicePicker(msg.chat.id);
-  });
-
-  onUserText(/^\/voice_set(?:@\w+)?(?:\s|$)/, async (msg) => {
-    await setVoiceFromCommand(msg.chat.id, msg.text);
   });
 
   onUserText(/^\/status(?:@\w+)?(?:\s|$)/, async (msg) => {
@@ -208,11 +173,6 @@ async function sendHelp(chatId) {
       "Команды:",
       "/menu - показать кнопки",
       "/voice - как отправлять голосовые",
-      "/voice_on - включить голос бота",
-      "/voice_off - выключить голос бота",
-      "/voice_toggle - переключить голос бота",
-      "/voices - выбрать голос кнопками",
-      "/voice_set nova - изменить голос командой",
       "/status - модели, память и лимиты",
       "/account_help - показать команды аккаунт-ассистента",
       "/account_status - статус ассистента аккаунта",
@@ -241,164 +201,15 @@ async function sendHelp(chatId) {
 }
 
 async function sendVoiceHelp(chatId) {
-  const memory = getUserMemory(chatId);
-
   await bot.sendMessage(
     chatId,
     [
       "Голосовые:",
       "1. Отправь обычное voice-сообщение в Telegram.",
       "2. Я скачаю аудио, расшифрую его и отвечу как на текст.",
-      "3. Ответ бота можно озвучивать или оставлять текстом.",
-      "",
-      `Голос бота: ${memory.voiceEnabled ? "включен" : "выключен"}`,
-      `Текущий голос: ${memory.ttsVoice || CONFIG.TTS_VOICE}`,
-      "",
-      "/voice_on - включить озвучку",
-      "/voice_off - выключить озвучку",
-      "/voice_toggle - переключить озвучку",
-      "/voices - выбрать голос кнопками",
-      "/voice_set nova - поставить голос командой",
+      "3. Ответ пришлю текстом.",
       "",
       `Лимит файла: ${Math.round(CONFIG.MAX_AUDIO_BYTES / 1024 / 1024)} MB.`
-    ].join("\n"),
-    MAIN_KEYBOARD
-  );
-}
-
-function buildVoiceSettingsText(memory) {
-  return [
-    "Голос бота:",
-    `Озвучка: ${memory.voiceEnabled ? "включена" : "выключена"}`,
-    `Голос: ${memory.ttsVoice || CONFIG.TTS_VOICE}`,
-    "",
-    "Команды:",
-    "/voice_on - включить",
-    "/voice_off - выключить",
-    "/voice_toggle - переключить",
-    "/voices - выбрать кнопками",
-    "/voice_set nova - выбрать командой"
-  ].join("\n");
-}
-
-function buildVoiceSettingsMenu(memory) {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          {
-            text: memory.voiceEnabled ? "Выключить голос" : "Включить голос",
-            callback_data: "menu:voice_toggle"
-          }
-        ],
-        [{ text: "Сменить голос", callback_data: "menu:voice_picker" }],
-        [{ text: "Назад в меню", callback_data: "menu:main" }]
-      ]
-    }
-  };
-}
-
-function buildVoicePickerMenu() {
-  const rows = CONFIG.TTS_VOICES.map((voice) => ([
-    { text: voice, callback_data: `menu:set_voice:${voice}` }
-  ]));
-
-  rows.push([{ text: "Назад", callback_data: "menu:voice_settings" }]);
-
-  return {
-    reply_markup: {
-      inline_keyboard: rows
-    }
-  };
-}
-
-function normalizeTtsVoice(voice) {
-  const cleanVoice = String(voice || "").trim().toLowerCase();
-
-  if (!/^[a-z0-9_-]{2,64}$/.test(cleanVoice)) {
-    return null;
-  }
-
-  return cleanVoice;
-}
-
-function parseCommandArg(text) {
-  return String(text || "").trim().split(/\s+/).slice(1).join(" ").trim();
-}
-
-async function sendVoiceSettings(chatId) {
-  const memory = getUserMemory(chatId);
-  await bot.sendMessage(chatId, buildVoiceSettingsText(memory), buildVoiceSettingsMenu(memory));
-}
-
-async function editVoiceSettings(chatId, messageId) {
-  const memory = getUserMemory(chatId);
-  await bot.editMessageText(buildVoiceSettingsText(memory), {
-    chat_id: chatId,
-    message_id: messageId,
-    ...buildVoiceSettingsMenu(memory)
-  });
-}
-
-async function sendVoicePicker(chatId) {
-  await bot.sendMessage(
-    chatId,
-    `Выбери голос бота. Сейчас: ${getUserMemory(chatId).ttsVoice || CONFIG.TTS_VOICE}`,
-    buildVoicePickerMenu()
-  );
-}
-
-async function editVoicePicker(chatId, messageId) {
-  await bot.editMessageText(
-    `Выбери голос бота. Сейчас: ${getUserMemory(chatId).ttsVoice || CONFIG.TTS_VOICE}`,
-    {
-      chat_id: chatId,
-      message_id: messageId,
-      ...buildVoicePickerMenu()
-    }
-  );
-}
-
-async function setVoiceMode(chatId, enabled) {
-  const memory = setVoiceEnabled(chatId, enabled);
-  await bot.sendMessage(
-    chatId,
-    `Голос бота ${memory.voiceEnabled ? "включен" : "выключен"}.`,
-    MAIN_KEYBOARD
-  );
-}
-
-async function toggleVoiceMode(chatId) {
-  const memory = toggleVoiceEnabled(chatId);
-  await bot.sendMessage(
-    chatId,
-    `Голос бота ${memory.voiceEnabled ? "включен" : "выключен"}.`,
-    MAIN_KEYBOARD
-  );
-}
-
-async function setVoiceFromCommand(chatId, text) {
-  const voice = normalizeTtsVoice(parseCommandArg(text));
-
-  if (!voice) {
-    await bot.sendMessage(
-      chatId,
-      `Напиши так: /voice_set nova\nДоступные: ${CONFIG.TTS_VOICES.join(", ")}`,
-      MAIN_KEYBOARD
-    );
-    return;
-  }
-
-  await setBotVoice(chatId, voice);
-}
-
-async function setBotVoice(chatId, voice) {
-  const memory = setTtsVoice(chatId, voice);
-  await bot.sendMessage(
-    chatId,
-    [
-      `Голос бота изменен: ${memory.ttsVoice}.`,
-      memory.voiceEnabled ? "Озвучка включена." : "Озвучка сейчас выключена. Включить: /voice_on"
     ].join("\n"),
     MAIN_KEYBOARD
   );
@@ -415,9 +226,6 @@ async function sendStatus(chatId) {
       `AI-модель: ${CONFIG.MODEL}`,
       `STT-модели: ${getSttModels().join(", ")}`,
       `Audio fallback: ${CONFIG.AUDIO_FALLBACK_MODEL}`,
-      `TTS model: ${CONFIG.TTS_MODEL}`,
-      `TTS voice: ${memory.ttsVoice || CONFIG.TTS_VOICE}`,
-      `Voice replies: ${memory.voiceEnabled ? "on" : "off"}`,
       `Сообщений сохранено: ${memory.messages.length}/${MAX_STORED_MESSAGES}`,
       `В запрос к AI идет последних сообщений: ${Math.min(memory.messages.length, MAX_HISTORY_MESSAGES)}/${MAX_HISTORY_MESSAGES}`,
       `Долгая память: ${memory.summary ? `${memory.summary.length} символов` : "пусто"}`,
@@ -537,16 +345,6 @@ async function handleMenuButton(chatId, text) {
     return true;
   }
 
-  if (text === BUTTONS.voiceToggle) {
-    await toggleVoiceMode(chatId);
-    return true;
-  }
-
-  if (text === BUTTONS.voiceChange) {
-    await sendVoicePicker(chatId);
-    return true;
-  }
-
   if (text === BUTTONS.status) {
     await sendStatus(chatId);
     return true;
@@ -580,33 +378,6 @@ async function handleInlineMenu(chatId, messageId, action) {
     return;
   }
 
-  if (action === "voice_settings") {
-    await editVoiceSettings(chatId, messageId);
-    return;
-  }
-
-  if (action === "voice_toggle") {
-    toggleVoiceEnabled(chatId);
-    await editVoiceSettings(chatId, messageId);
-    return;
-  }
-
-  if (action === "voice_picker") {
-    await editVoicePicker(chatId, messageId);
-    return;
-  }
-
-  if (action.startsWith("set_voice:")) {
-    const voice = normalizeTtsVoice(action.slice("set_voice:".length));
-
-    if (voice) {
-      setTtsVoice(chatId, voice);
-    }
-
-    await editVoiceSettings(chatId, messageId);
-    return;
-  }
-
   if (action === "status") {
     await sendStatus(chatId);
     return;
@@ -626,16 +397,10 @@ module.exports = {
   sendMainMenu,
   sendHelp,
   sendVoiceHelp,
-  sendVoiceSettings,
-  sendVoicePicker,
   sendStatus,
   sendBotToBotStatus,
   sendBotMessageFromCommand,
   resetChatMemory,
   handleMenuButton,
-  handleInlineMenu,
-  setVoiceMode,
-  toggleVoiceMode,
-  setVoiceFromCommand,
-  setBotVoice
+  handleInlineMenu
 };

@@ -21,11 +21,6 @@ let shutdownHandlersRegistered = false;
 let users = loadMemory();
 registerMemoryShutdownHandlers();
 
-function getDefaultVoiceEnabled() {
-  const mode = String(CONFIG.VOICE_REPLY_MODE || "off").toLowerCase();
-  return mode !== "off" && mode !== "text";
-}
-
 function ensureMemoryDirectory() {
   fs.mkdirSync(path.dirname(CONFIG.MEMORY_FILE), { recursive: true });
 }
@@ -140,8 +135,6 @@ function createEmptyMemory() {
     personalNotes: [],
     messageCount: 0,
     lastSeen: null,
-    voiceEnabled: getDefaultVoiceEnabled(),
-    ttsVoice: CONFIG.TTS_VOICE,
     summary: ""
   };
 }
@@ -310,12 +303,6 @@ function normalizeUserMemory(value) {
     ? Number(value.messageCount)
     : normalizedMessages.filter((message) => message.role === "user").length;
   memory.lastSeen = typeof value.lastSeen === "string" ? value.lastSeen : null;
-  memory.voiceEnabled = typeof value.voiceEnabled === "boolean"
-    ? value.voiceEnabled
-    : memory.voiceEnabled;
-  memory.ttsVoice = typeof value.ttsVoice === "string" && value.ttsVoice.trim()
-    ? value.ttsVoice.trim()
-    : memory.ttsVoice;
 
   return memory;
 }
@@ -672,33 +659,6 @@ function resetMemory(chatId) {
   saveMemory();
 }
 
-function setVoiceEnabled(chatId, enabled) {
-  const memory = getUserMemory(chatId);
-  memory.voiceEnabled = Boolean(enabled);
-  saveMemory();
-  return memory;
-}
-
-function toggleVoiceEnabled(chatId) {
-  const memory = getUserMemory(chatId);
-  memory.voiceEnabled = !memory.voiceEnabled;
-  saveMemory();
-  return memory;
-}
-
-function setTtsVoice(chatId, voice) {
-  const cleanVoice = String(voice || "").trim();
-
-  if (!cleanVoice) {
-    throw new Error("TTS voice is empty");
-  }
-
-  const memory = getUserMemory(chatId);
-  memory.ttsVoice = cleanVoice;
-  saveMemory();
-  return memory;
-}
-
 function getUserCount() {
   return Object.keys(users).length;
 }
@@ -712,9 +672,6 @@ module.exports = {
   getUserMemory,
   remember,
   resetMemory,
-  setVoiceEnabled,
-  toggleVoiceEnabled,
-  setTtsVoice,
   getUserCount,
   updatePersonalityMemory,
   getLastMessageByRole,

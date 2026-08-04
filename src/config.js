@@ -39,20 +39,6 @@ const CONFIG = {
     process.env.OPENROUTER_VISION_MODEL ||
     "openai/gpt-4o-mini",
 
-  TTS_MODEL:
-    process.env.OPENROUTER_TTS_MODEL ||
-    "openai/gpt-4o-mini-tts-2025-12-15",
-
-  TTS_VOICE: process.env.OPENROUTER_TTS_VOICE || "nova",
-  TTS_VOICES: (process.env.OPENROUTER_TTS_VOICES || "alloy,echo,fable,onyx,nova,shimmer")
-    .split(",")
-    .map((voice) => voice.trim())
-    .filter(Boolean),
-  TTS_FORMAT: process.env.OPENROUTER_TTS_FORMAT || "mp3",
-  TTS_SPEED: Number(process.env.OPENROUTER_TTS_SPEED || 1),
-  TTS_MAX_CHARS: Number(process.env.TTS_MAX_CHARS || 3500),
-  VOICE_REPLY_MODE: process.env.VOICE_REPLY_MODE || "always",
-
   BOT_TOKEN: process.env.BOT_TOKEN,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
   PORT: process.env.PORT || 12722,

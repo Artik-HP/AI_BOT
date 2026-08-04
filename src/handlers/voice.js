@@ -71,7 +71,7 @@ async function handleAudioMessage(bot, chatId, msg, audio) {
     : transcript;
 
   const aiReply = await askAI(chatId, userText, msg.from);
-  await sendAIResponse(chatId, aiReply, { preferVoice: true });
+  await sendAIResponse(chatId, aiReply);
 }
 
 function registerVoiceHandler(bot) {

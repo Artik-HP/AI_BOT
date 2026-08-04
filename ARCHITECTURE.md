@@ -78,8 +78,6 @@
 - `PORT` — порт для Express-сервера;
 - `MAX_AUDIO_BYTES` — лимит размера аудио;
 - `OPENROUTER_MODEL`, `OPENROUTER_STT_MODEL`, `OPENROUTER_AUDIO_MODEL` — модели для AI и аудио;
-- `OPENROUTER_TTS_MODEL`, `OPENROUTER_TTS_VOICE`, `OPENROUTER_TTS_VOICES` — настройки синтеза речи;
-- `VOICE_REPLY_MODE` — режим голосовых ответов.
 
 Конфигурация аккаунт-ассистента и bot-to-bot задаётся отдельными переменными.
 
