@@ -634,7 +634,10 @@ async function processIncomingAccountMessage(event) {
   const profile = buildSenderProfile(sender, message);
   const chatId = profile.chatId || profile.id;
 
-  if (!chatId || !shouldHandlePeer(profile) || !processedMessages.claim(`${chatId}:${message.id}`)) {
+  // A message without an id cannot be deduplicated, so it is let through rather than mistaken for a repeat.
+  const isRepeat = message.id ? !processedMessages.claim(`${chatId}:${message.id}`) : false;
+
+  if (!chatId || !shouldHandlePeer(profile) || isRepeat) {
     return;
   }
 

@@ -1,0 +1,4 @@
+# ORIGINAL code (pre-audit-baseline), 100 chats / 11 MB memory, 30 concurrent messages, 3 runs
+memory 100 chats: delivered all 30 in 14374 ms
+memory 100 chats: TIMEOUT; delivered: 29 | OR requests: 30 | exited: {"code":1,"signal":null}
+memory 100 chats: delivered all 30 in 14438 ms

@@ -451,6 +451,31 @@ test("private-only: группы игнорируются, пока владел
   }
 });
 
+test("повторная доставка того же сообщения не создаёт второй черновик; сообщения без id не считаются повтором", async () => {
+  const t = await boot();
+
+  try {
+    const event = incoming({ chatId: 985, username: "dup_friend", text: "привет" });
+
+    await t.handle(event);
+    await t.handle(event);
+    assert.equal(t.noticeCount(), 1, "тот же id сообщения - один черновик");
+
+    const withoutId = (text) => {
+      const e = incoming({ chatId: 986, username: "no_id_friend", text });
+
+      delete e.message.id;
+      return e;
+    };
+
+    await t.handle(withoutId("первое без id"));
+    await t.handle(withoutId("второе без id"));
+    assert.equal(t.noticeCount(), 3, "оба сообщения без id обработаны");
+  } finally {
+    await t.close();
+  }
+});
+
 test("боты, собственные и пустые сообщения игнорируются", async () => {
   const t = await boot();
 

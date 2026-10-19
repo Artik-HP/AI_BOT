@@ -35,8 +35,11 @@ class FakeTelegram {
       wake();
     }
 
-    await new Promise((resolve) => this.server.close(resolve));
+    // Keep-alive sockets would make close() wait for the server's idle timeout (seconds), so drop them first.
+    const closed = new Promise((resolve) => this.server.close(resolve));
+
     this.server.closeAllConnections?.();
+    await closed;
   }
 
   sent(method = "sendMessage") {
@@ -126,7 +129,14 @@ class FakeTelegram {
 
     if (fileMatch) {
       const entry = [...this.files.values()].find((file) => file.path === fileMatch[2]);
+      const fileFailure = this.fail.get("FILE_DOWNLOAD");
       this.calls.push({ method: "FILE_DOWNLOAD", params: { path: fileMatch[2] }, at: Date.now() });
+
+      if (fileFailure) {
+        res.statusCode = fileFailure.code;
+        res.end(fileFailure.description);
+        return;
+      }
 
       if (!entry) {
         res.statusCode = 404;

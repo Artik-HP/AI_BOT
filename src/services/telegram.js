@@ -370,6 +370,17 @@ async function downloadTelegramFile(fileId, options) {
   }
 }
 
+// node-telegram-bot-api: stopPolling({ cancel: true }) alone returns at once but the loop re-arms itself
+// in a `finally` block and keeps polling; a plain stopPolling() waits for the whole long-poll (up to ~10 s).
+// Raising the library's own abort flag first makes the stop immediate and final.
+async function stopTelegramPolling(bot) {
+  if (bot?._polling) {
+    bot._polling._abort = true;
+  }
+
+  await bot.stopPolling({ cancel: true, reason: "shutdown" });
+}
+
 // Gives running replies a chance to go out before the process stops.
 async function waitForChatTasks(timeoutMs) {
   await Promise.race([
@@ -393,5 +404,6 @@ module.exports = {
   enqueueChatTask,
   downloadTelegramFile,
   isFileTooLargeError,
+  stopTelegramPolling,
   waitForChatTasks
 };

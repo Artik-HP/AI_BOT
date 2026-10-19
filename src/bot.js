@@ -84,7 +84,7 @@ function start() {
 
   CONFIG.validateConfig();
 
-  const { createTelegramBot, getBotToBotStatus, waitForChatTasks } = require("./services/telegram");
+  const { createTelegramBot, getBotToBotStatus, stopTelegramPolling, waitForChatTasks } = require("./services/telegram");
   const commands = require("./commands");
   const { registerTextHandler } = require("./handlers/text");
   const { registerPhotoHandler } = require("./handlers/photo");
@@ -163,7 +163,7 @@ function start() {
     setTimeout(() => process.exit(exitCode || 1), SHUTDOWN_TIMEOUT_MS).unref();
 
     try {
-      await bot.stopPolling({ cancel: true, reason: "shutdown" });
+      await stopTelegramPolling(bot);
       await waitForChatTasks(CHAT_TASKS_GRACE_MS);
       await stopAccountAssistant();
 

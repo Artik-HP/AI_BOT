@@ -1,0 +1,3 @@
+{"scenario":"memory 1 chats (0.1 MB) + 30 concurrent messages","totalMsFor30Replies":315,"healthSamples":3,"healthLatencyMs":{"p50":105.6,"p95":127.8,"max":127.8}}
+{"error":"timeout waiting for 30 ответов"}
+{"scenario":"voice 18 MB end to end","totalMs":412,"peakRssMb":256}

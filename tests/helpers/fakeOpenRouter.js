@@ -35,8 +35,10 @@ class FakeOpenRouter {
   }
 
   async stop() {
-    await new Promise((resolve) => this.server.close(resolve));
+    const closed = new Promise((resolve) => this.server.close(resolve));
+
     this.server.closeAllConnections?.();
+    await closed;
   }
 
   of(pathname) {
