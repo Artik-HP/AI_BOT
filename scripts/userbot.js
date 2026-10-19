@@ -51,33 +51,6 @@ function parseCommand(text) {
   };
 }
 
-function buildHelpText() {
-  return [
-    "Userbot команды:",
-    ".help — показать это сообщение",
-    ".ping — проверить связь",
-    ".say <текст> — повторить текст",
-    ".echo <текст> — дублировать текст",
-    ".whoami — информация об аккаунте",
-    ".status — состояние userbot",
-    ".chatid — ID текущего чата",
-    ".time — текущее время"
-  ].join("\n");
-}
-
-function buildStatusText(me, client) {
-  return [
-    "Userbot статус:",
-    `Username: ${me.username || "<none>"}`,
-    `Name: ${[me.firstName, me.lastName].filter(Boolean).join(" ") || "<unknown>"}`,
-    `User ID: ${me.id?.toString() || "<unknown>"}`,
-    `Session: ${session ? "loaded" : "missing"}`,
-    `Telegram API ID: ${apiId}`,
-    `Connected: ${client?.isConnected ? "yes" : "no"}`,
-    `Environment: ${process.env.NODE_ENV || "development"}`
-  ].join("\n");
-}
-
 async function safeReply(message, text) {
   if (!message) {
     return;
@@ -100,63 +73,13 @@ async function safeSendSelf(client, text) {
 
 async function handleCommand(client, event, command) {
   const message = event.message;
-
-  switch (command.name) {
-    case "help":
-      await safeReply(message, buildHelpText());
-      break;
-
-    case "ping":
-      await safeReply(message, "pong");
-      break;
-
-    case "say": {
-      if (!command.args) {
-        await safeReply(message, "Использование: .say <текст>");
-        return;
-      }
-      await safeReply(message, command.args);
-      break;
-    }
-
-    case "echo": {
-      if (!command.args) {
-        await safeReply(message, "Использование: .echo <текст>");
-        return;
-      }
-      await safeReply(message, command.args);
-      break;
-    }
-
-    case "whoami": {
-      const me = await client.getMe();
-      const name = [me.firstName, me.lastName].filter(Boolean).join(" ") || "<unknown>";
-      await safeReply(message, `Я: ${name}\nUsername: ${me.username || "<none>"}\nID: ${me.id?.toString() || "<unknown>"}`);
-      break;
-    }
-
-    case "status": {
-      const me = await client.getMe();
-      await safeReply(message, buildStatusText(me, client));
-      break;
-    }
-
-    case "chatid": {
-      await safeReply(message, `Chat ID: ${message.chatId || message.peerId?.chatId || "<unknown>"}`);
-      break;
-    }
-
-    case "time": {
-      await safeReply(message, `Текущее время: ${new Date().toLocaleString()}`);
-      break;
-    }
-
-    default:
-      console.log("Unknown command:", command.name);
-      break;
-  }
+  const chatId = String(message.chatId || message.peerId?.chatId || 'unknown');
+  const userId = String(message.senderId || 'unknown');
+  const response = await require('../src/commandSystem/engine').execute({
+    scope: `u:${chatId}:${userId}`, transport: 'userbot', chatId, userId, client
+  }, 'userbot_' + command.name, {args:command.args}, `u:${chatId}:${message.id}`);
+  for (const chunk of require('../src/services/telegram').splitTelegramMessage(response.text)) await safeReply(message,chunk);
 }
-
 async function handleIncomingMessage(client, event) {
   const message = event.message;
 
@@ -192,7 +115,11 @@ async function startUserbot() {
     { connectionRetries: 5 }
   );
 
-  client.addEventHandler((event) => handleIncomingMessage(client, event), new NewMessage({ incoming: true }));
+  client.addEventHandler((event) => {
+    handleIncomingMessage(client, event).catch((error) => {
+      console.error("Userbot message handler error:", error.message || error);
+    });
+  }, new NewMessage({ incoming: true }));
 
   await client.connect();
 
@@ -204,18 +131,25 @@ async function startUserbot() {
     await safeSendSelf(client, startMessage);
   }
 
-  process.on("SIGINT", async () => {
+  const shutdown = async () => {
     console.log("Stopping userbot...");
-    await client.disconnect();
+    await client.disconnect().catch((error) => {
+      console.error("Failed to disconnect userbot:", error.message || error);
+    });
     process.exit(0);
-  });
+  };
+
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 
   process.on("unhandledRejection", (error) => {
     console.error("Unhandled rejection:", error);
   });
 }
 
-startUserbot().catch((error) => {
+if (require.main === module) startUserbot().catch((error) => {
   console.error("Userbot failed to start:", error.message || error);
   process.exit(1);
 });
+
+module.exports = { parseCommand, handleCommand, handleIncomingMessage, startUserbot };

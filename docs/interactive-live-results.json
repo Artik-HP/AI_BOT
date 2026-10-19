@@ -1,0 +1,106 @@
+{
+  "createdAt": "2026-10-14T13:51:31.756Z",
+  "boundary": "Real OpenRouter, schema validation, keyboard generation and isolated persistent history; Telegram delivery/clicks require a separate live test.",
+  "results": [
+    {
+      "model": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+      "scenario": "hosting-single",
+      "transport": "json",
+      "stream": false,
+      "passed": true,
+      "optionCount": 3,
+      "continuedInteractively": false,
+      "continuation": "Вы выбрали VPS. Это хороший вариант для размещения Telegram-бота, так как он обеспечивает высокую производительность и надежность. Давайте перейдем к следующему шагу настройки вашего бота."
+    },
+    {
+      "model": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+      "scenario": "features-multiple",
+      "transport": "json",
+      "stream": false,
+      "passed": true,
+      "optionCount": 4,
+      "continuedInteractively": false,
+      "continuation": "Вы выбрали функции: Приём заказов, AI-консультант. Теперь давайте обсудим, как их реализовать. С чего начнём?"
+    },
+    {
+      "model": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+      "scenario": "open-question",
+      "transport": "json",
+      "stream": false,
+      "passed": true
+    },
+    {
+      "model": "openai/gpt-4o-mini",
+      "scenario": "hosting-single",
+      "transport": "schema",
+      "stream": false,
+      "passed": true,
+      "optionCount": 3,
+      "continuedInteractively": false,
+      "continuation": "Отлично, ты выбрал VPS для размещения бота. Теперь давай поговорим о том, какие функции ты хочешь реализовать в своем боте? Это может быть что угодно: от обработки заказов до общения с клиентами."
+    },
+    {
+      "model": "openai/gpt-4o-mini",
+      "scenario": "features-multiple",
+      "transport": "schema",
+      "stream": false,
+      "passed": true,
+      "optionCount": 4,
+      "continuedInteractively": false,
+      "continuation": "Отлично! Вы выбрали функции: приём заказов и AI-консультант. Двигаемся дальше! Какую следующую функцию или задачу вы хотите обсудить?"
+    },
+    {
+      "model": "openai/gpt-4o-mini",
+      "scenario": "open-question",
+      "transport": "schema",
+      "stream": false,
+      "passed": true
+    },
+    {
+      "model": "openai/gpt-4o-mini",
+      "mode": "tools",
+      "stream": false,
+      "scenario": "transport-single",
+      "passed": true,
+      "optionCount": 3
+    },
+    {
+      "model": "openai/gpt-4o-mini",
+      "mode": "tools",
+      "stream": true,
+      "scenario": "transport-single",
+      "passed": true,
+      "optionCount": 3
+    },
+    {
+      "model": "openai/gpt-4o-mini",
+      "mode": "schema",
+      "stream": true,
+      "scenario": "transport-single",
+      "passed": true,
+      "optionCount": 3
+    },
+    {
+      "model": "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+      "mode": "json",
+      "stream": true,
+      "scenario": "transport-single",
+      "passed": true,
+      "optionCount": 3
+    },
+    {
+      "model": "openai/gpt-4o-mini",
+      "mode": "prompt",
+      "stream": true,
+      "scenario": "transport-single",
+      "passed": true,
+      "optionCount": 3
+    },
+    {
+      "model": "openai/gpt-4o-mini",
+      "scenario": "real-image-question",
+      "passed": true,
+      "optionCount": 2
+    }
+  ]
+}

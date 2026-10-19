@@ -1,0 +1,70 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "interactive_question"
+      ]
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "selection_mode": {
+      "type": "string",
+      "enum": [
+        "single",
+        "multiple"
+      ]
+    },
+    "options": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "A distinct complete user answer identifying this option, not a generic boolean shared by options."
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "value"
+        ]
+      }
+    },
+    "allow_custom_input": {
+      "type": "boolean"
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 12000
+    }
+  },
+  "required": [
+    "type",
+    "question",
+    "selection_mode",
+    "options",
+    "allow_custom_input"
+  ]
+}

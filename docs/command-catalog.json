@@ -1,0 +1,2223 @@
+{
+  "version": 1,
+  "categories": {
+    "system": "🏠 Главное",
+    "ai": "✨ AI и идеи",
+    "games": "🎮 Игры",
+    "tools": "🛠 Инструменты",
+    "code": "💻 Код и обучение",
+    "daily": "🌿 На каждый день",
+    "account": "🔐 Аккаунт",
+    "userbot": "📡 Userbot"
+  },
+  "commands": [
+    {
+      "id": "start",
+      "title": "Начать",
+      "description": "Открыть главное меню",
+      "category": "system",
+      "icon": "👋",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "existing"
+    },
+    {
+      "id": "menu",
+      "title": "Меню",
+      "description": "Категории команд и быстрый запуск",
+      "category": "system",
+      "icon": "🏠",
+      "example": "tools",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "existing"
+    },
+    {
+      "id": "help",
+      "title": "Помощь",
+      "description": "Полный список доступных команд",
+      "category": "system",
+      "icon": "❔",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "existing"
+    },
+    {
+      "id": "bot_chat",
+      "title": "Входящий диалог ботов",
+      "description": "Скрытый входящий запрос доверенного бота",
+      "category": "system",
+      "icon": "🤖",
+      "example": "Привет",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "hidden": true,
+      "botOnly": true,
+      "external": "OpenRouter / Telegram",
+      "origin": "existing"
+    },
+    {
+      "id": "favorites",
+      "title": "Избранное",
+      "description": "Запуск любимых команд",
+      "category": "system",
+      "icon": "⭐",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "recent",
+      "title": "Недавние",
+      "description": "Последние использованные команды",
+      "category": "system",
+      "icon": "🕘",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "search",
+      "title": "Поиск",
+      "description": "Найти команду по названию или описанию",
+      "category": "system",
+      "icon": "🔎",
+      "example": "погода",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "favorite",
+      "title": "В избранное",
+      "description": "Добавить или убрать команду из избранного",
+      "category": "system",
+      "icon": "🌟",
+      "example": "quiz",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "status",
+      "title": "Статус",
+      "description": "Модели, память и лимиты",
+      "category": "system",
+      "icon": "📊",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "existing"
+    },
+    {
+      "id": "voice",
+      "title": "Голосовые",
+      "description": "Как отправить голосовое или аудиофайл",
+      "category": "system",
+      "icon": "🎙",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "existing"
+    },
+    {
+      "id": "reset",
+      "title": "Очистить память",
+      "description": "Очистить память текущего диалога",
+      "category": "system",
+      "icon": "🧹",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "existing"
+    },
+    {
+      "id": "chat",
+      "title": "Диалог",
+      "description": "Продолжить диалог с AI",
+      "category": "ai",
+      "icon": "💬",
+      "example": "Привет!",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "explain",
+      "title": "Объяснить",
+      "description": "Объяснить сложную тему с понятными примерами",
+      "category": "ai",
+      "icon": "🧠",
+      "example": "Как работает DNS?",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "translate",
+      "title": "Перевод",
+      "description": "Определить язык и перевести текст",
+      "category": "ai",
+      "icon": "🌐",
+      "example": "на английский: Привет, мир",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "summarize",
+      "title": "Краткий пересказ",
+      "description": "Выделить главное в большом тексте",
+      "category": "ai",
+      "icon": "📝",
+      "example": "Текст для пересказа",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "ideas",
+      "title": "Необычные идеи",
+      "description": "Придумать разнообразные идеи на выбранную тему",
+      "category": "ai",
+      "icon": "💡",
+      "example": "Что сделать в дождливый выходной?",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "brainstorm",
+      "title": "Мозговой штурм",
+      "description": "Развить идею через вопросы и варианты",
+      "category": "ai",
+      "icon": "🌪",
+      "example": "Придумать домашнюю игру",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "compare",
+      "title": "Сравнение",
+      "description": "Сравнить варианты по явным критериям",
+      "category": "ai",
+      "icon": "⚖",
+      "example": "Node.js и Python для небольшого API",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "joke",
+      "title": "Шутка",
+      "description": "Придумать шутку на выбранную тему",
+      "category": "ai",
+      "icon": "😄",
+      "example": "о программистах",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "story",
+      "title": "История с выбором",
+      "description": "Интерактивная история, которую направляет пользователь",
+      "category": "ai",
+      "icon": "📖",
+      "example": "Космический детектив",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "code",
+      "title": "Пример кода",
+      "description": "Генерация примера кода с объяснением",
+      "category": "code",
+      "icon": "⌨",
+      "example": "JS: debounce",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "debug",
+      "title": "Найти ошибку",
+      "description": "Разобрать ошибку и предложить исправление",
+      "category": "code",
+      "icon": "🐛",
+      "example": "JS: const a = null; a.name",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "refactor",
+      "title": "Рефакторинг",
+      "description": "Улучшить код с сохранением поведения",
+      "category": "code",
+      "icon": "♻",
+      "example": "JS: function add(a,b){return a+b}",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "review",
+      "title": "Проверка кода",
+      "description": "Анализ качества, рисков и читаемости кода",
+      "category": "code",
+      "icon": "🔬",
+      "example": "JS: function div(a,b){return a/b}",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "regex",
+      "title": "Помощник regex",
+      "description": "Составить регулярное выражение и примеры",
+      "category": "code",
+      "icon": "🔎",
+      "example": "Найти даты YYYY-MM-DD",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "algorithm",
+      "title": "Алгоритмы",
+      "description": "Объяснить алгоритм с кодом и сложностью",
+      "category": "code",
+      "icon": "🧩",
+      "example": "Бинарный поиск",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "OpenRouter",
+      "origin": "new"
+    },
+    {
+      "id": "select",
+      "title": "Выбор вариантов",
+      "description": "Подтверждение нескольких ответов AI",
+      "category": "system",
+      "icon": "✓",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "hidden": true,
+      "origin": "new"
+    },
+    {
+      "id": "quiz",
+      "title": "Викторина",
+      "description": "Три темы, три сложности, ответы и баллы",
+      "category": "games",
+      "icon": "🧠",
+      "example": "science easy",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "learnjs",
+      "title": "Учить JavaScript",
+      "description": "Пять интерактивных уроков с проверкой ответа",
+      "category": "code",
+      "icon": "📚",
+      "example": "start",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "guess",
+      "title": "Угадай число",
+      "description": "Игра от 1 до 100 с подсказками",
+      "category": "games",
+      "icon": "🎯",
+      "example": "50",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "riddle",
+      "title": "Загадки",
+      "description": "Загадки с подсказкой и проверкой ответа",
+      "category": "games",
+      "icon": "🗝",
+      "example": "hint",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "trivia",
+      "title": "Любопытный факт",
+      "description": "Факт из локальной подборки с объяснением",
+      "category": "games",
+      "icon": "🔭",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "wouldyou",
+      "title": "Что выберешь?",
+      "description": "Необычные дилеммы с фиксацией выбора",
+      "category": "games",
+      "icon": "🤔",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "challenge",
+      "title": "Испытание ума",
+      "description": "Случайная арифметическая задача с проверкой",
+      "category": "games",
+      "icon": "⚡",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "password",
+      "title": "Пароль",
+      "description": "Криптографически случайный пароль",
+      "category": "tools",
+      "icon": "🔑",
+      "example": "20",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "uuid",
+      "title": "UUID",
+      "description": "Случайные UUID версии 4",
+      "category": "tools",
+      "icon": "🆔",
+      "example": "3",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "hash",
+      "title": "Хеш текста",
+      "description": "SHA-256 или SHA-512 от текста",
+      "category": "tools",
+      "icon": "🔏",
+      "example": "sha256 Привет",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "base64",
+      "title": "Base64",
+      "description": "Кодирование и декодирование UTF-8",
+      "category": "tools",
+      "icon": "📦",
+      "example": "encode Привет",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "json",
+      "title": "Формат JSON",
+      "description": "Проверить JSON и красиво отформатировать",
+      "category": "tools",
+      "icon": "🧾",
+      "example": "{\"name\":\"Alex\",\"active\":true}",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "timestamp",
+      "title": "Unix-время",
+      "description": "Преобразование Unix и ISO 8601",
+      "category": "tools",
+      "icon": "⏱",
+      "example": "1700000000",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "calculator",
+      "title": "Калькулятор",
+      "description": "Безопасные арифметические выражения",
+      "category": "tools",
+      "icon": "🧮",
+      "example": "(12 + 8) * 3",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "convert",
+      "title": "Единицы",
+      "description": "Длина, масса, объём, время и температура",
+      "category": "tools",
+      "icon": "📏",
+      "example": "10 km m",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "morse",
+      "title": "Азбука Морзе",
+      "description": "Кодирование латинского текста в Морзе",
+      "category": "tools",
+      "icon": "📻",
+      "example": "SOS",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "wordstats",
+      "title": "Статистика текста",
+      "description": "Символы, слова, строки и время чтения",
+      "category": "tools",
+      "icon": "🔤",
+      "example": "Текст для анализа",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "qr",
+      "title": "QR-код",
+      "description": "Создать PNG с QR-кодом текста или ссылки",
+      "category": "tools",
+      "icon": "▦",
+      "example": "https://example.com",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "random",
+      "title": "Случайное число",
+      "description": "Криптографически случайное целое в диапазоне",
+      "category": "daily",
+      "icon": "🎲",
+      "example": "1 100",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "decision",
+      "title": "Выбрать вариант",
+      "description": "Случайный выбор из твоих вариантов",
+      "category": "daily",
+      "icon": "🧭",
+      "example": "кино | прогулка | книга",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "time",
+      "title": "Мировое время",
+      "description": "Текущее время в часовом поясе IANA",
+      "category": "daily",
+      "icon": "🌍",
+      "example": "Europe/Kyiv",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "weather",
+      "title": "Погода",
+      "description": "Текущая погода из Open-Meteo по городу",
+      "category": "daily",
+      "icon": "🌤",
+      "example": "Kyiv",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "external": "Open-Meteo",
+      "origin": "new"
+    },
+    {
+      "id": "notes",
+      "title": "Заметки",
+      "description": "Сохранять и удалять личные заметки",
+      "category": "daily",
+      "icon": "🗒",
+      "example": "add Идея для выходного",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "todo",
+      "title": "Мои задачи",
+      "description": "Добавлять задачи и отмечать выполнение",
+      "category": "daily",
+      "icon": "☑",
+      "example": "add Прочитать книгу",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "reminder",
+      "title": "Напоминания",
+      "description": "Сохранять напоминания с реальным планировщиком",
+      "category": "daily",
+      "icon": "🔔",
+      "example": "10m Выпить воды",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "timer",
+      "title": "Таймер",
+      "description": "Таймер с уведомлением",
+      "category": "daily",
+      "icon": "⏲",
+      "example": "5m",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": true,
+        "userbot": false
+      },
+      "origin": "new"
+    },
+    {
+      "id": "account_help",
+      "title": "Помощь аккаунта",
+      "description": "Управление ассистентом: помощь аккаунта",
+      "category": "account",
+      "icon": "🔐",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "origin": "existing"
+    },
+    {
+      "id": "account_status",
+      "title": "Статус аккаунта",
+      "description": "Управление ассистентом: статус аккаунта",
+      "category": "account",
+      "icon": "🔐",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "origin": "existing"
+    },
+    {
+      "id": "account_config",
+      "title": "Настройки аккаунта",
+      "description": "Управление ассистентом: настройки аккаунта",
+      "category": "account",
+      "icon": "🔐",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "origin": "existing"
+    },
+    {
+      "id": "account_pending",
+      "title": "Черновики",
+      "description": "Управление ассистентом: черновики",
+      "category": "account",
+      "icon": "🔐",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "origin": "existing"
+    },
+    {
+      "id": "account_send",
+      "title": "Отправить черновик",
+      "description": "Управление ассистентом: отправить черновик",
+      "category": "account",
+      "icon": "🔐",
+      "example": "ID",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "external": "Telegram Account / OpenRouter",
+      "origin": "existing"
+    },
+    {
+      "id": "account_drop",
+      "title": "Отклонить черновик",
+      "description": "Управление ассистентом: отклонить черновик",
+      "category": "account",
+      "icon": "🔐",
+      "example": "ID",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "origin": "existing"
+    },
+    {
+      "id": "account_reply",
+      "title": "Свой ответ",
+      "description": "Управление ассистентом: свой ответ",
+      "category": "account",
+      "icon": "🔐",
+      "example": "ID текст",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "external": "Telegram Account / OpenRouter",
+      "origin": "existing"
+    },
+    {
+      "id": "account_redraft",
+      "title": "Обновить черновик",
+      "description": "Управление ассистентом: обновить черновик",
+      "category": "account",
+      "icon": "🔐",
+      "example": "ID",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "external": "Telegram Account / OpenRouter",
+      "origin": "existing"
+    },
+    {
+      "id": "account_message",
+      "title": "Написать от аккаунта",
+      "description": "Управление ассистентом: написать от аккаунта",
+      "category": "account",
+      "icon": "🔐",
+      "example": "@username текст",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "external": "Telegram Account / OpenRouter",
+      "origin": "existing"
+    },
+    {
+      "id": "account_mode",
+      "title": "Режим ассистента",
+      "description": "Управление ассистентом: режим ассистента",
+      "category": "account",
+      "icon": "🔐",
+      "example": "approval",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "origin": "existing"
+    },
+    {
+      "id": "account_private",
+      "title": "Только личные чаты",
+      "description": "Управление ассистентом: только личные чаты",
+      "category": "account",
+      "icon": "🔐",
+      "example": "true",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "origin": "existing"
+    },
+    {
+      "id": "account_allow",
+      "title": "Разрешить чат",
+      "description": "Управление ассистентом: разрешить чат",
+      "category": "account",
+      "icon": "🔐",
+      "example": "@username",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "origin": "existing"
+    },
+    {
+      "id": "account_unallow",
+      "title": "Убрать разрешение",
+      "description": "Управление ассистентом: убрать разрешение",
+      "category": "account",
+      "icon": "🔐",
+      "example": "@username",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "origin": "existing"
+    },
+    {
+      "id": "account_block",
+      "title": "Заблокировать чат",
+      "description": "Управление ассистентом: заблокировать чат",
+      "category": "account",
+      "icon": "🔐",
+      "example": "@username",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "origin": "existing"
+    },
+    {
+      "id": "account_unblock",
+      "title": "Снять блокировку",
+      "description": "Управление ассистентом: снять блокировку",
+      "category": "account",
+      "icon": "🔐",
+      "example": "@username",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "origin": "existing"
+    },
+    {
+      "id": "account_enable",
+      "title": "Включить ассистента",
+      "description": "Управление ассистентом: включить ассистента",
+      "category": "account",
+      "icon": "🔐",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "external": "Telegram Account / OpenRouter",
+      "origin": "existing"
+    },
+    {
+      "id": "account_disable",
+      "title": "Отключить ассистента",
+      "description": "Управление ассистентом: отключить ассистента",
+      "category": "account",
+      "icon": "🔐",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "account",
+      "origin": "existing"
+    },
+    {
+      "id": "bot_status",
+      "title": "Связь с ботами",
+      "description": "Общение с другим Telegram-ботом",
+      "category": "account",
+      "icon": "🤖",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "bot",
+      "external": "Telegram",
+      "origin": "existing"
+    },
+    {
+      "id": "bot_send",
+      "title": "Написать боту",
+      "description": "Общение с другим Telegram-ботом",
+      "category": "account",
+      "icon": "🤖",
+      "example": "@username текст",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": true,
+        "web": false,
+        "userbot": false
+      },
+      "owner": "bot",
+      "external": "Telegram",
+      "origin": "existing"
+    },
+    {
+      "id": "userbot_help",
+      "title": "Помощь",
+      "description": "Userbot: помощь",
+      "category": "userbot",
+      "icon": "📡",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": false,
+        "web": false,
+        "userbot": true
+      },
+      "origin": "existing"
+    },
+    {
+      "id": "userbot_ping",
+      "title": "Проверка связи",
+      "description": "Userbot: проверка связи",
+      "category": "userbot",
+      "icon": "📡",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": false,
+        "web": false,
+        "userbot": true
+      },
+      "origin": "existing"
+    },
+    {
+      "id": "userbot_say",
+      "title": "Повторить текст",
+      "description": "Userbot: повторить текст",
+      "category": "userbot",
+      "icon": "📡",
+      "example": "Привет",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": false,
+        "web": false,
+        "userbot": true
+      },
+      "origin": "existing"
+    },
+    {
+      "id": "userbot_echo",
+      "title": "Дублировать текст",
+      "description": "Userbot: дублировать текст",
+      "category": "userbot",
+      "icon": "📡",
+      "example": "Привет",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": false,
+        "web": false,
+        "userbot": true
+      },
+      "origin": "existing"
+    },
+    {
+      "id": "userbot_whoami",
+      "title": "Мой аккаунт",
+      "description": "Userbot: мой аккаунт",
+      "category": "userbot",
+      "icon": "📡",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": false,
+        "web": false,
+        "userbot": true
+      },
+      "external": "Telegram Account",
+      "origin": "existing"
+    },
+    {
+      "id": "userbot_status",
+      "title": "Состояние userbot",
+      "description": "Userbot: состояние userbot",
+      "category": "userbot",
+      "icon": "📡",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": false,
+        "web": false,
+        "userbot": true
+      },
+      "external": "Telegram Account",
+      "origin": "existing"
+    },
+    {
+      "id": "userbot_chatid",
+      "title": "ID чата",
+      "description": "Userbot: id чата",
+      "category": "userbot",
+      "icon": "📡",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": false,
+        "web": false,
+        "userbot": true
+      },
+      "origin": "existing"
+    },
+    {
+      "id": "userbot_time",
+      "title": "Текущее время",
+      "description": "Userbot: текущее время",
+      "category": "userbot",
+      "icon": "📡",
+      "example": "",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "type": "string",
+            "maxLength": 16000
+          }
+        },
+        "required": [
+          "args"
+        ]
+      },
+      "availability": {
+        "telegram": false,
+        "web": false,
+        "userbot": true
+      },
+      "origin": "existing"
+    }
+  ]
+}
