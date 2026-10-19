@@ -233,7 +233,8 @@ test("/bot_send: многострочный текст не склеиваетс
       BOT_TO_BOT_ENABLED: "true",
       BOT_TO_BOT_OWNER_CHAT_ID: String(OWNER),
       BOT_TO_BOT_CHAT_ID: "-100777",
-      BOT_TO_BOT_TARGET_BOT_USERNAME: "Peer_Test_Bot"
+      BOT_TO_BOT_TARGET_BOT_USERNAME: "Peer_Test_Bot",
+      BOT_TO_BOT_ALLOW_BOTS: "Peer_Test_Bot,Second_Peer_Bot"
     }
   }, async ({ tg }) => {
     const replies = await say(tg, OWNER, "/bot_send строка1\nстрока2\n\nстрока4");
@@ -245,8 +246,9 @@ test("/bot_send: многострочный текст не склеиваетс
     const explicit = await say(tg, OWNER, "/bot_send @peer_test_bot явная цель");
     assert.equal(explicit[0].text, "@peer_test_bot явная цель");
 
-    const explicitMultiline = await say(tg, OWNER, "/bot_send @peer_test_bot первая\nвторая\n\nчетвёртая");
-    assert.equal(explicitMultiline[0].text, "@peer_test_bot первая\nвторая\n\nчетвёртая");
+    // Явная цель отличается от цели по умолчанию, иначе разбор, потерявший цель, дал бы тот же результат.
+    const explicitMultiline = await say(tg, OWNER, "/bot_send @second_peer_bot первая\nвторая\n\nчетвёртая");
+    assert.equal(explicitMultiline[0].text, "@second_peer_bot первая\nвторая\n\nчетвёртая");
 
     const legacyMultiline = await say(tg, OWNER, "/bot_send peer_test_bot раз\nдва");
     assert.equal(legacyMultiline[0].text, "@peer_test_bot раз\nдва");
