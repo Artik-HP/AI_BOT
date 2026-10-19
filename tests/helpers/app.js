@@ -121,6 +121,10 @@ async function waitReady(tg, app, timeoutMs = 10000) {
 async function withApp(options, fn) {
   const tg = await new FakeTelegram(options.telegram).start();
   const or = await new FakeOpenRouter().start();
+
+  // Lets a test arrange the fakes (for example a failing getMe) before the bot process starts.
+  options.setup?.({ tg, or });
+
   const app = await launchApp({ tg, or, env: options.env, legacy: options.legacy });
 
   try {

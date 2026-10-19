@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const CONFIG = require("../config");
 const logger = require("../utils/logger");
-const { sanitizeInline } = require("../utils/text");
+const { sanitizeInline, trimLineEnds } = require("../utils/text");
 
 const {
   MAX_HISTORY_MESSAGES,
@@ -295,10 +295,7 @@ function normalizeMessageList(messages) {
 }
 
 function trimMemorySummary(summary) {
-  const cleanSummary = String(summary || "")
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .trim();
+  const cleanSummary = trimLineEnds(String(summary || "").replace(/\r\n/g, "\n")).trim();
 
   if (cleanSummary.length <= MAX_MEMORY_SUMMARY_CHARS) {
     return cleanSummary;

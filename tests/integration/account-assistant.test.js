@@ -7,6 +7,7 @@ const os = require("os");
 const path = require("path");
 const { FakeOpenRouter, TEST_OPENROUTER_KEY, failure, reply } = require("../helpers/fakeOpenRouter");
 const { createFakeBot } = require("../helpers/fakeBot");
+const { FakeTelegram } = require("../helpers/fakeTelegram");
 const { loadFresh, waitFor } = require("../helpers/freshModules");
 
 const OWNER = 555;
@@ -608,6 +609,29 @@ test("статус для /health не содержит списков конт�
     assert.ok(!JSON.stringify(status).includes("alice_friend"));
     assert.ok(!JSON.stringify(status).includes("spam_account"));
   } finally {
+    await t.close();
+  }
+});
+
+test("команды ассистента, адресованные другому боту в группе, игнорируются; свои выполняются (F024)", async () => {
+  const tg = await new FakeTelegram().start();
+  const t = await boot({ env: { BOT_TOKEN: tg.token, TELEGRAM_API_BASE_URL: tg.url } });
+  // The same module instance the assistant uses: getMe() tells it which "/cmd@name" is meant for this bot.
+  const telegram = require("../../src/services/telegram");
+  const controlBot = telegram.createTelegramBot();
+
+  try {
+    await waitFor(() => telegram.getBotUsername() === "test_audit_bot", 5000, "getMe");
+
+    await t.bot.text(OWNER, "/account_status@some_other_bot");
+    await t.bot.text(OWNER, "/account_config@some_other_bot");
+    assert.equal(t.bot.sent.length, 0, "чужая команда не должна получить ответ");
+
+    await t.bot.text(OWNER, "/account_status@test_audit_bot");
+    assert.equal(t.bot.sent.length, 1, "своя команда выполнена");
+  } finally {
+    await telegram.stopTelegramPolling(controlBot);
+    await tg.stop();
     await t.close();
   }
 });

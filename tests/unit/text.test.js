@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { sanitizeInline, splitMessage } = require("../../src/utils/text");
+const { sanitizeInline, splitMessage, trimLineEnds } = require("../../src/utils/text");
 
 const stripSpace = (text) => text.replace(/\s+/g, "");
 const char = (codePoint) => String.fromCodePoint(codePoint);
@@ -76,4 +76,17 @@ test("sanitizeInline: убирает управляющие символы, пе
   assert.equal(sanitizeInline("x".repeat(100), 10), "xxxxxxxxxx");
   assert.equal(sanitizeInline("😀😀😀", 2), "😀😀");
   assert.equal(sanitizeInline(null), "");
+});
+
+test("trimLineEnds: убирает хвостовые пробелы построчно и остаётся линейным на длинных пробельных сериях", () => {
+  assert.equal(trimLineEnds("a  \nb\t\t\n  c  "), "a\nb\n  c");
+  assert.equal(trimLineEnds(""), "");
+  assert.equal(trimLineEnds(null), "");
+
+  // /[ \t]+\n/g на таких строках считает минутами (квадратичный перебор), здесь - миллисекунды
+  const started = Date.now();
+
+  assert.equal(trimLineEnds(" ".repeat(1_000_000)), "");
+  assert.equal(trimLineEnds(`a${" ".repeat(1_000_000)}b`).length, 1_000_002);
+  assert.ok(Date.now() - started < 1500, `слишком медленно: ${Date.now() - started} мс`);
 });

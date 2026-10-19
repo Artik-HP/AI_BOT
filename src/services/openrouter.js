@@ -2,7 +2,7 @@ const axios = require("axios");
 const CONFIG = require("../config");
 const logger = require("../utils/logger");
 const { ApiError, describeError, isTransientError, toSafeError } = require("../utils/errors");
-const { sanitizeInline } = require("../utils/text");
+const { sanitizeInline, trimLineEnds } = require("../utils/text");
 const {
   MAX_HISTORY_MESSAGES,
   getUserMemory,
@@ -375,10 +375,7 @@ function extractJsonObject(text) {
 }
 
 function trimAccountReply(text) {
-  const cleanText = String(text || "")
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .trim();
+  const cleanText = trimLineEnds(String(text || "").replace(/\r\n/g, "\n")).trim();
 
   if (cleanText.length <= CONFIG.ACCOUNT_ASSISTANT_MAX_TEXT_CHARS) {
     return cleanText;

@@ -5,6 +5,7 @@ const logger = require("./utils/logger");
 
 const SHUTDOWN_TIMEOUT_MS = 15000;
 const CHAT_TASKS_GRACE_MS = 8000;
+const POLLING_ERROR_LOG_INTERVAL_MS = 60000;
 const SIGNAL_EXIT_CODES = {
   SIGINT: 130,
   SIGTERM: 143,
@@ -56,6 +57,35 @@ function createWebApp({ getDetails }) {
   });
 
   return app;
+}
+
+// When Telegram or the network is down the library retries about once a second; logging every failure
+// would bury the log (and hide the real cause), so equal failures are summarised once per interval.
+function createPollingErrorLogger(now = Date.now) {
+  let lastLoggedAt = 0;
+  let suppressed = 0;
+
+  return function logPollingError(error) {
+    const current = now();
+
+    if (current - lastLoggedAt < POLLING_ERROR_LOG_INTERVAL_MS) {
+      suppressed += 1;
+      return;
+    }
+
+    const message = String(error?.message || "");
+    let hint = "";
+
+    if (/\b409\b/.test(message)) {
+      hint = " Подсказка: этим токеном уже работает другой экземпляр бота (409 Conflict) - остановите лишний.";
+    } else if (/\b401\b/.test(message)) {
+      hint = " Подсказка: Telegram отклонил BOT_TOKEN (401) - проверьте токен у @BotFather.";
+    }
+
+    logger.error(`Telegram polling error${suppressed ? ` (и ещё ${suppressed} таких же с прошлой записи)` : ""}:${hint}`, error);
+    lastLoggedAt = current;
+    suppressed = 0;
+  };
 }
 
 function registerProcessHandlers(shutdown) {
@@ -110,9 +140,7 @@ function start() {
     logger.error("Account assistant start error:", error);
   });
 
-  bot.on("polling_error", (error) => {
-    logger.error("Telegram polling error:", error);
-  });
+  bot.on("polling_error", createPollingErrorLogger());
 
   const app = createWebApp({
     getDetails: () => {
@@ -197,5 +225,6 @@ function start() {
 module.exports = {
   start,
   createWebApp,
+  createPollingErrorLogger,
   tokensMatch
 };

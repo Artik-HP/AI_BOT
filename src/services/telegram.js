@@ -14,6 +14,9 @@ const botConversationWindows = new Map();
 const enqueueChatTask = createKeyedQueue();
 const TRUNCATION_NOTICE = "\n\n[ответ слишком длинный, остаток отброшен]";
 const FILE_TOO_LARGE = "FILE_TOO_LARGE";
+const IDENTITY_MAX_ATTEMPTS = 8;
+const IDENTITY_RETRY_BASE_MS = 1000;
+const IDENTITY_RETRY_MAX_MS = 60000;
 let bot;
 let botIdentity;
 
@@ -23,7 +26,15 @@ function createTelegramBot() {
     baseApiUrl: CONFIG.TELEGRAM_API_BASE_URL
   });
 
-  bot.getMe()
+  loadBotIdentity(bot);
+
+  return bot;
+}
+
+// Without its own identity the bot cannot tell which "/cmd@name" or @mention is meant for it,
+// so a failed getMe() (network blip at start) is retried with a growing pause instead of being forgotten.
+function loadBotIdentity(currentBot, attempt = 1) {
+  currentBot.getMe()
     .then((identity) => {
       botIdentity = {
         id: String(identity.id),
@@ -31,10 +42,16 @@ function createTelegramBot() {
       };
     })
     .catch((error) => {
-      logger.error("Telegram getMe error:", error);
-    });
+      logger.error(`Telegram getMe error (попытка ${attempt} из ${IDENTITY_MAX_ATTEMPTS}):`, error);
 
-  return bot;
+      if (attempt >= IDENTITY_MAX_ATTEMPTS || currentBot !== bot) {
+        return;
+      }
+
+      const delay = Math.min(IDENTITY_RETRY_BASE_MS * 2 ** (attempt - 1), IDENTITY_RETRY_MAX_MS);
+
+      setTimeout(() => loadBotIdentity(currentBot, attempt + 1), delay).unref();
+    });
 }
 
 function getTelegramBot() {

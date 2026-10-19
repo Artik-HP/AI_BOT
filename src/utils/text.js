@@ -67,8 +67,26 @@ function sanitizeInline(value, maxLength = 32) {
   return Array.from(flat).slice(0, maxLength).join("");
 }
 
+// Removes trailing spaces and tabs from every line. The obvious /[ \t]+\n/g is quadratic on a long run of
+// spaces (a megabyte of them freezes the process for minutes), this version is linear.
+function trimLineEnds(text) {
+  return String(text ?? "")
+    .split("\n")
+    .map((line) => {
+      let end = line.length;
+
+      while (end > 0 && (line.charCodeAt(end - 1) === 32 || line.charCodeAt(end - 1) === 9)) {
+        end -= 1;
+      }
+
+      return end === line.length ? line : line.slice(0, end);
+    })
+    .join("\n");
+}
+
 module.exports = {
   TELEGRAM_MESSAGE_LIMIT,
   sanitizeInline,
-  splitMessage
+  splitMessage,
+  trimLineEnds
 };

@@ -112,6 +112,19 @@ test("парсер черновиков ассистента: JSON, JSON в бл
   assert.equal(parseAccountAssistantDraft("{ сломанный json").sendable, false);
 });
 
+test("разбор черновика не зависает на огромной пробельной серии в ответе модели", () => {
+  const { parseAccountAssistantDraft } = loadFresh("services/openrouter", {
+    OPENROUTER_API_KEY: TEST_OPENROUTER_KEY,
+    MEMORY_FILE: path.join(os.tmpdir(), "aibot-parse-big.json"),
+    LOG_LEVEL: "silent"
+  });
+  const started = Date.now();
+
+  assert.equal(parseAccountAssistantDraft(" ".repeat(1_000_000)).reply, "");
+  assert.equal(parseAccountAssistantDraft(`слово${" ".repeat(1_000_000)}ещё`).sendable, false);
+  assert.ok(Date.now() - started < 3000, `разбор занял ${Date.now() - started} мс`);
+});
+
 test("ошибки скачивания файла не содержат токена бота (адрес файла его включает) (F007)", async () => {
   const tg = await new FakeTelegram().start();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aibot-svc-"));

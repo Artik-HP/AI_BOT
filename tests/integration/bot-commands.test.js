@@ -245,6 +245,12 @@ test("/bot_send: многострочный текст не склеиваетс
     const explicit = await say(tg, OWNER, "/bot_send @peer_test_bot явная цель");
     assert.equal(explicit[0].text, "@peer_test_bot явная цель");
 
+    const explicitMultiline = await say(tg, OWNER, "/bot_send @peer_test_bot первая\nвторая\n\nчетвёртая");
+    assert.equal(explicitMultiline[0].text, "@peer_test_bot первая\nвторая\n\nчетвёртая");
+
+    const legacyMultiline = await say(tg, OWNER, "/bot_send peer_test_bot раз\nдва");
+    assert.equal(legacyMultiline[0].text, "@peer_test_bot раз\nдва");
+
     const usage = await say(tg, OWNER, "/bot_send");
     assert.match(usage[0].text, /Используй: \/bot_send/);
   });

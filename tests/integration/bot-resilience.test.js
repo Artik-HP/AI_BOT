@@ -280,3 +280,32 @@ test("повреждённый memory.json не затирается: уходи
     await or.stop();
   }
 });
+
+test("getMe не ответил при старте: личность бота подтягивается повторной попыткой, чужие команды отсекаются", async () => {
+  const healthToken = "details-token-for-test";
+
+  await withApp({
+    env: { HEALTH_TOKEN: healthToken },
+    setup: ({ tg }) => tg.failNext("getMe", 500, "Internal Server Error", 1)
+  }, async ({ tg, or, app }) => {
+    or.chat = () => reply("ок");
+
+    const identityLoaded = async () => {
+      const response = await app.http("/health/details", { authorization: `Bearer ${healthToken}` });
+
+      return JSON.parse(response.text).botToBot?.identityLoaded === true;
+    };
+
+    await waitFor(identityLoaded, 15000, "личность бота после повторного getMe");
+
+    assert.equal(tg.calls.filter((call) => call.method === "getMe").length, 2, "один сбой и одна успешная повторная попытка");
+    assert.match(app.output(), /Telegram getMe error \(попытка 1 из 8\)/);
+
+    tg.message({ chatId: 5101, text: "/help@some_other_bot" });
+    tg.message({ chatId: 5102, text: "/help@test_audit_bot" });
+    await tg.waitFor(() => tg.texts().some((text) => text.startsWith("Команды:")), 8000, "ответ на свою команду");
+    await tg.quiet(400);
+
+    assert.equal(tg.texts().filter((text) => text.startsWith("Команды:")).length, 1, "команда чужому боту не выполнена");
+  });
+});
