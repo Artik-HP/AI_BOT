@@ -46,7 +46,7 @@
 | F020 | Синхронная запись всего хранилища на каждое сообщение | Отложенная асинхронная атомарная запись с генерационным счётчиком | **H · T · M:M16** — unit `memory` (3), perf-замеры | ИСПРАВЛЕНО |
 | F021 | Каскад STT-запросов с полным аудио на нефатальных ошибках | Остановка на 401/402/403/413; ограничение числа запросов | **B · T · M:M17** — `bot-flow`: «голос: ошибка авторизации…» | ИСПРАВЛЕНО. Пригодность модели STT по умолчанию не проверена (нет доступа к OpenRouter) |
 | F022 | Нечисловые значения env (`25MB`) молча отключают лимиты | `readBytes` (`25MB`, `8mb`, `1.5GB`), некорректное значение → предупреждение и значение по умолчанию | **B · H · T · M:M18** — `bot-flow` (3), `bot-resilience`, unit `config` | ИСПРАВЛЕНО |
-| F023 | Нет тестов, линтера, CI; Dependabot не следит за npm | `node:test` (155 тестов), ESLint, `ci.yml` (Node 20/22/24 + audit), Dependabot (npm, actions, devcontainer) | **T** — `npm run check` | ИСПРАВЛЕНО. Workflow запущен на GitHub (PR #3): Node 20 / 22 / 24 и audit — `success` |
+| F023 | Нет тестов, линтера, CI; Dependabot не следит за npm | `node:test` (166 тестов), ESLint, `ci.yml` (Node 20/22/24 + audit), Dependabot (npm, actions, devcontainer) | **T** — `npm run check` | ИСПРАВЛЕНО. Workflow запущен на GitHub (PR #3): Node 20 / 22 / 24 и audit — `success` |
 | F024 | Бот отвечает на команды, адресованные другим ботам | `isAddressedToThisBot` в командах и в командах ассистента | **B · T · M:M19,M20** — `bot-commands` | ИСПРАВЛЕНО |
 
 ## Low

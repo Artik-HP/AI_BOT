@@ -24,7 +24,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
-      - run: npm test
+      # Обычный отчёт + аннотации: причина падения видна прямо на проверке (tests/helpers/githubReporter.js)
+      - run: npm test -- --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./tests/helpers/githubReporter.js --test-reporter-destination=stdout
 
   audit:
     name: Dependency audit
