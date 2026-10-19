@@ -1,4 +1,25 @@
-node_modules
-memory.json
+# зависимости
+node_modules/
+
+# секреты и окружение (шаблон .env.example отслеживается)
 .env
+.env.*
+!.env.example
+
+# сессии Telegram: это авторизованный доступ к аккаунту, в git им не место
+*.session
+*.session-journal
+userbot.session*
+
+# данные пользователей: память бота, резервные копии и «повреждённые» файлы
+memory.json
+memory.json.*
+*.corrupt-*
+
+# логи и артефакты
+*.log
+npm-debug.log*
+coverage/
+
+# личные заметки
 ПОЛЕЗНЫЕ КОДЫ, КОМАНДЫ И Т.Д.txt
