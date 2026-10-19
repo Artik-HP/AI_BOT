@@ -1,16 +1,20 @@
 const axios = require("axios");
+const crypto = require("crypto");
 const TelegramBot = require("node-telegram-bot-api");
 const CONFIG = require("../config");
 const { getErrorDetails } = require("../utils/errors");
 const {
-  dedupeRepeatedReply,
-  normalizeForCompare
-} = require("./memory");
-
+  validateQuestion,
+  visibleText,
+  historyText,
+} = require("./interactiveQuestion");
 const {
-  PROCESSED_MESSAGE_TTL_MS,
-  DUPLICATE_REPLY_TTL_MS
-} = CONFIG;
+  getInteractiveState,
+  renderQuestionKeyboard,
+} = require("./interactiveState");
+const { dedupeRepeatedReply, normalizeForCompare } = require("./memory");
+
+const { PROCESSED_MESSAGE_TTL_MS, DUPLICATE_REPLY_TTL_MS } = CONFIG;
 
 const processedMessages = new Set();
 const lastAiReplies = new Map();
@@ -21,16 +25,32 @@ let botIdentity;
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 
-function createTelegramBot() {
-  bot = new TelegramBot(CONFIG.BOT_TOKEN, { polling: true });
+function createTelegramBot(options = {}) {
+  const useWebhook = Boolean(CONFIG.WEBHOOK_URL);
+  bot = new TelegramBot(CONFIG.BOT_TOKEN, {
+    polling: options.polling ?? !useWebhook,
+  });
   attachOutgoingMessageLogger(bot);
 
+  if (useWebhook && options.configureWebhook !== false) {
+    const webhookUrl = `${CONFIG.WEBHOOK_URL}${CONFIG.WEBHOOK_PATH}`;
+    const setWebHookOptions = { secret_token: CONFIG.WEBHOOK_SECRET_TOKEN };
+
+    bot
+      .setWebHook(webhookUrl, setWebHookOptions)
+      .then(() => console.log(`Telegram webhook set to ${webhookUrl}`))
+      .catch((error) =>
+        console.error("Telegram setWebHook error:", error.message),
+      );
+  }
+
   if (typeof bot.getMe === "function") {
-    bot.getMe()
+    bot
+      .getMe()
       .then((identity) => {
         botIdentity = {
           id: String(identity.id),
-          username: normalizeTelegramUsername(identity.username)
+          username: normalizeTelegramUsername(identity.username),
         };
       })
       .catch((error) => {
@@ -41,24 +61,8 @@ function createTelegramBot() {
   return bot;
 }
 
-function formatOutgoingText(text) {
-  if (typeof text === "string") {
-    return text;
-  }
-
-  try {
-    return JSON.stringify(text);
-  } catch (error) {
-    return String(text);
-  }
-}
-
-function logOutgoingMessage(chatId, text) {
-  console.log("================================");
-  console.log("Ответ бота");
-  console.log("Chat ID:", chatId);
-  console.log("Текст:", formatOutgoingText(text));
-  console.log("================================");
+function logOutgoingMessage() {
+  console.log("Ответ бота отправлен");
 }
 
 function attachOutgoingMessageLogger(telegramBot) {
@@ -75,6 +79,27 @@ function attachOutgoingMessageLogger(telegramBot) {
   };
 
   telegramBot.__outgoingMessageLoggerAttached = true;
+}
+
+function verifyWebhookSecret(req, res, next) {
+  const expected = CONFIG.WEBHOOK_SECRET_TOKEN;
+  const received = req.get("X-Telegram-Bot-Api-Secret-Token");
+
+  if (!expected || !received) {
+    return res.sendStatus(401);
+  }
+
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  const receivedBuffer = Buffer.from(received, "utf8");
+
+  if (
+    expectedBuffer.length !== receivedBuffer.length ||
+    !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
+  ) {
+    return res.sendStatus(401);
+  }
+
+  return next();
 }
 
 function getTelegramBot() {
@@ -97,12 +122,18 @@ function claimIncomingMessage(msg) {
   }
 
   processedMessages.add(key);
-  setTimeout(() => processedMessages.delete(key), PROCESSED_MESSAGE_TTL_MS).unref?.();
+  setTimeout(
+    () => processedMessages.delete(key),
+    PROCESSED_MESSAGE_TTL_MS,
+  ).unref?.();
   return true;
 }
 
 function normalizeTelegramUsername(username) {
-  const cleanUsername = String(username || "").trim().replace(/^@/, "").toLowerCase();
+  const cleanUsername = String(username || "")
+    .trim()
+    .replace(/^@/, "")
+    .toLowerCase();
   return /^[a-z0-9_]{5,32}$/.test(cleanUsername) ? cleanUsername : null;
 }
 
@@ -117,7 +148,9 @@ function isAllowedBotIdentity(identity = {}) {
   return CONFIG.BOT_TO_BOT_ALLOW_BOTS.some((allowedBot) => {
     const allowedId = String(allowedBot || "").trim();
     const allowedUsername = normalizeTelegramUsername(allowedBot);
-    return (id && allowedId === id) || (username && allowedUsername === username);
+    return (
+      (id && allowedId === id) || (username && allowedUsername === username)
+    );
   });
 }
 
@@ -139,7 +172,7 @@ function isBotIdentityMatch(identity = {}, expected) {
 
   return Boolean(
     (id && id === expectedRaw) ||
-    (username && expectedUsername && username === expectedUsername)
+    (username && expectedUsername && username === expectedUsername),
   );
 }
 
@@ -148,7 +181,7 @@ function isConfiguredBotToBotPeerMessage(msg) {
     CONFIG.BOT_TO_BOT_CHAT_ID &&
     CONFIG.BOT_TO_BOT_TARGET_BOT_USERNAME &&
     isConfiguredBotToBotChat(msg) &&
-    isBotIdentityMatch(msg.from, CONFIG.BOT_TO_BOT_TARGET_BOT_USERNAME)
+    isBotIdentityMatch(msg.from, CONFIG.BOT_TO_BOT_TARGET_BOT_USERNAME),
   );
 }
 
@@ -167,7 +200,9 @@ function isBotMessageDirectedAtThisBot(msg) {
     return false;
   }
 
-  return new RegExp(`(^|\\W)@${botIdentity.username}(?=$|\\W)`, "i").test(String(msg.text || ""));
+  return new RegExp(`(^|\\W)@${botIdentity.username}(?=$|\\W)`, "i").test(
+    String(msg.text || ""),
+  );
 }
 
 function claimIncomingBotMessage(msg) {
@@ -226,12 +261,14 @@ function getBotToBotStatus() {
     username: botIdentity?.username || null,
     identityLoaded: Boolean(botIdentity?.id),
     chatId: CONFIG.BOT_TO_BOT_CHAT_ID || null,
-    targetBotUsername: normalizeTelegramUsername(CONFIG.BOT_TO_BOT_TARGET_BOT_USERNAME),
+    targetBotUsername: normalizeTelegramUsername(
+      CONFIG.BOT_TO_BOT_TARGET_BOT_USERNAME,
+    ),
     allowBots: CONFIG.BOT_TO_BOT_ALLOW_BOTS,
     maxTurns: CONFIG.BOT_TO_BOT_MAX_TURNS,
     windowMs: CONFIG.BOT_TO_BOT_WINDOW_MS,
     minIntervalMs: CONFIG.BOT_TO_BOT_MIN_INTERVAL_MS,
-    ownerChatIdConfigured: Boolean(CONFIG.BOT_TO_BOT_OWNER_CHAT_ID)
+    ownerChatIdConfigured: Boolean(CONFIG.BOT_TO_BOT_OWNER_CHAT_ID),
   };
 }
 
@@ -257,13 +294,10 @@ async function sendMessageToBot(username, text) {
   }
 
   if (chatId) {
-    return getTelegramBot().sendMessage(
-      chatId,
-      prefixBotMention(cleanText, cleanUsername).slice(0, TELEGRAM_MESSAGE_LIMIT)
-    );
+    return sendTextChunks(chatId, prefixBotMention(cleanText, cleanUsername));
   }
 
-  return getTelegramBot().sendMessage(`@${cleanUsername}`, cleanText.slice(0, TELEGRAM_MESSAGE_LIMIT));
+  return sendTextChunks(`@${cleanUsername}`, cleanText);
 }
 
 function shouldSkipDuplicateReply(chatId, reply) {
@@ -271,15 +305,10 @@ function shouldSkipDuplicateReply(chatId, reply) {
   const normalized = normalizeForCompare(reply);
   const previous = lastAiReplies.get(String(chatId));
 
-  lastAiReplies.set(String(chatId), {
-    normalized,
-    time: now
-  });
-
   return Boolean(
     previous &&
     previous.normalized === normalized &&
-    now - previous.time < DUPLICATE_REPLY_TTL_MS
+    now - previous.time < DUPLICATE_REPLY_TTL_MS,
   );
 }
 
@@ -290,7 +319,10 @@ function prefixBotMention(text, username) {
     return text;
   }
 
-  const mentionPattern = new RegExp(`(^|\\s)@${cleanUsername}(?=$|\\s|[,.!?;:])`, "i");
+  const mentionPattern = new RegExp(
+    `(^|\\s)@${cleanUsername}(?=$|\\s|[,.!?;:])`,
+    "i",
+  );
 
   if (mentionPattern.test(text)) {
     return text;
@@ -317,29 +349,152 @@ function getBotToBotReplyOptions(msg) {
 
   return {
     replyToMessageId: msg.message_id,
-    targetUsername: msg.from.username
+    targetUsername: msg.from.username,
   };
 }
 
 async function sendAIMessage(chatId, reply, options = {}) {
-  const cleanReply = dedupeRepeatedReply(reply);
+  const question = validateQuestion(reply) ? reply : null;
+  const cleanReply = question
+    ? visibleText(question, options.answerUserId == null)
+    : dedupeRepeatedReply(reply);
+  const comparisonText = historyText(reply);
 
-  if (!cleanReply || shouldSkipDuplicateReply(chatId, cleanReply)) {
+  if (
+    !cleanReply ||
+    (!options.interactionId && shouldSkipDuplicateReply(chatId, comparisonText))
+  ) {
     return;
   }
 
-  await sendCleanTextMessage(chatId, cleanReply, options);
+  let state, record, delivery;
+  if (options.interactionId || (question && options.answerUserId != null)) {
+    try {
+      state = getInteractiveState();
+    } catch (error) {
+      if (options.interactionId) throw error;
+      // A damaged UI state file must not prevent an ordinary manual conversation.
+      return sendCleanTextMessage(chatId, historyText(question), options);
+    }
+    delivery = options.interactionId
+      ? state.get(options.interactionId)?.delivery
+      : null;
+    if (question && options.answerUserId != null) {
+      try {
+        record = delivery?.questionId
+          ? state.get(delivery.questionId)
+          : state.create(chatId, options.answerUserId, question, options.model);
+        if (options.memoryScope)
+          state.update(record.id, { memoryScope: options.memoryScope });
+      } catch (error) {
+        if (options.interactionId) throw error;
+        return sendCleanTextMessage(chatId, historyText(question), options);
+      }
+      if (delivery && !delivery.questionId) {
+        delivery = { ...delivery, questionId: record.id };
+        state.update(options.interactionId, { delivery });
+      }
+    }
+  }
+  const result = await sendCleanTextMessage(chatId, cleanReply, {
+    ...options,
+    replyMarkup: record ? renderQuestionKeyboard(record) : undefined,
+    startChunk: delivery?.chunksSent || 0,
+    onChunkSent: state
+      ? (index, message) => {
+          if (record)
+            state.update(record.id, { messageId: message.message_id });
+          if (options.interactionId) {
+            state.update(options.interactionId, {
+              delivery: {
+                ...state.get(options.interactionId).delivery,
+                chunksSent: index + 1,
+                lastMessageId: message.message_id,
+              },
+            });
+          }
+        }
+      : undefined,
+  });
+  lastAiReplies.set(String(chatId), {
+    normalized: normalizeForCompare(comparisonText),
+    time: Date.now(),
+  });
+  return result;
 }
 
 async function sendCleanTextMessage(chatId, cleanReply, options = {}) {
-  const text = prefixBotMention(cleanReply, options.targetUsername).slice(0, TELEGRAM_MESSAGE_LIMIT);
-  await bot.sendMessage(chatId, text, buildSendMessageOptions(options));
+  const text = prefixBotMention(cleanReply, options.targetUsername);
+  return sendTextChunks(chatId, text, options);
+}
+
+async function sendTextChunks(chatId, text, options = {}) {
+  const chunks = splitTelegramMessage(text);
+  let result;
+
+  for (const [index, chunk] of chunks.entries()) {
+    if (index < (options.startChunk || 0)) continue;
+    const chunkOptions = index === 0 ? buildSendMessageOptions(options) : {};
+    if (index === chunks.length - 1 && options.replyMarkup)
+      chunkOptions.reply_markup = options.replyMarkup;
+    result = await getTelegramBot().sendMessage(chatId, chunk, chunkOptions);
+    if (options.onChunkSent) await options.onChunkSent(index, result);
+  }
+
+  return result;
+}
+
+function splitTelegramMessage(text) {
+  const remaining = Array.from(String(text || ""));
+  const chunks = [];
+
+  while (remaining.length) {
+    let chunk = "";
+
+    while (
+      remaining.length &&
+      chunk.length + remaining[0].length <= TELEGRAM_MESSAGE_LIMIT
+    ) {
+      chunk += remaining.shift();
+    }
+
+    if (remaining.length) {
+      const breakAt = Math.max(chunk.lastIndexOf("\n"), chunk.lastIndexOf(" "));
+      if (breakAt > TELEGRAM_MESSAGE_LIMIT * 0.6) {
+        remaining.unshift(...Array.from(chunk.slice(breakAt + 1)));
+        chunk = chunk.slice(0, breakAt + 1);
+      }
+    }
+
+    if (chunk) {
+      chunks.push(chunk);
+    }
+  }
+
+  return chunks;
 }
 
 async function sendAIResponse(chatId, reply, options = {}) {
-  await sendAIMessage(chatId, reply, options);
+  return sendAIMessage(chatId, reply, options);
 }
 
+async function refreshInteractiveKeyboard(record) {
+  if (!record?.messageId) return;
+  await getTelegramBot().editMessageReplyMarkup(
+    renderQuestionKeyboard(record),
+    {
+      chat_id: record.chatId,
+      message_id: record.messageId,
+    },
+  );
+}
+
+async function invalidateInteractiveQuestions(chatId, exceptId) {
+  const state = getInteractiveState();
+  const records = state.invalidate(chatId, exceptId);
+  for (const record of records)
+    await refreshInteractiveKeyboard(record).catch(() => {});
+}
 
 function enqueueChatTask(chatId, task) {
   const key = String(chatId);
@@ -361,13 +516,13 @@ function getDownloadOptions(options) {
   if (typeof options === "number") {
     return {
       maxBytes: options,
-      fileLabel: "File"
+      fileLabel: "File",
     };
   }
 
   return {
     maxBytes: Number(options?.maxBytes || CONFIG.MAX_AUDIO_BYTES),
-    fileLabel: options?.fileLabel || "File"
+    fileLabel: options?.fileLabel || "File",
   };
 }
 
@@ -378,13 +533,15 @@ async function downloadTelegramFile(fileId, options) {
     responseType: "arraybuffer",
     timeout: 60000,
     maxContentLength: maxBytes,
-    maxBodyLength: maxBytes
+    maxBodyLength: maxBytes,
   });
 
   const fileBuffer = Buffer.from(response.data);
 
   if (fileBuffer.length > maxBytes) {
-    throw new Error(`${fileLabel} file is too large: ${fileBuffer.length} bytes`);
+    throw new Error(
+      `${fileLabel} file is too large: ${fileBuffer.length} bytes`,
+    );
   }
 
   return fileBuffer;
@@ -392,6 +549,7 @@ async function downloadTelegramFile(fileId, options) {
 
 module.exports = {
   createTelegramBot,
+  verifyWebhookSecret,
   getTelegramBot,
   claimIncomingMessage,
   claimIncomingBotMessage,
@@ -400,6 +558,9 @@ module.exports = {
   sendMessageToBot,
   sendAIMessage,
   sendAIResponse,
+  refreshInteractiveKeyboard,
+  invalidateInteractiveQuestions,
+  splitTelegramMessage,
   enqueueChatTask,
-  downloadTelegramFile
+  downloadTelegramFile,
 };

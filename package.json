@@ -7,7 +7,20 @@
     "start": "node index.js",
     "telegram:session": "node scripts/create-telegram-session.js",
     "userbot": "node scripts/userbot.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/*.test.js",
+    "check": "node scripts/check-syntax.js",
+    "test:live:interactive": "node scripts/check-interactive-live.js",
+    "web": "node src/web.js",
+    "test:e2e": "playwright test",
+    "commands:catalog": "node scripts/export-command-catalog.js",
+    "test:live:commands": "node scripts/check-commands-live.js",
+    "open:web": "node scripts/open-web.js",
+    "setup": "node scripts/setup.js",
+    "lint": "eslint src scripts public/*.js tests index.js response.js playwright.config.js eslint.config.cjs",
+    "verify": "npm run lint && npm run check && npm test",
+    "doctor": "node scripts/doctor.js",
+    "package:vps": "node scripts/package-vps.js",
+    "check:vps": "node scripts/check-vps.js"
   },
   "keywords": [],
   "author": "",
@@ -17,9 +30,26 @@
     "@neondatabase/serverless": "^1.1.0",
     "@vercel/speed-insights": "^2.0.0",
     "axios": "^1.16.0",
+    "dompurify": "^3.4.17",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "marked": "^18.1.1",
     "node-telegram-bot-api": "^0.67.0",
+    "qrcode": "^1.5.4",
     "telegram": "^2.26.22"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.1",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "overrides": {
+    "request": "npm:@cypress/request@4.0.1",
+    "@cypress/request": "4.0.1",
+    "qs": "^6.16.0"
   }
 }

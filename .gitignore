@@ -1,4 +1,21 @@
 node_modules
 memory.json
 .env
+interactive-state.json
+interactive-state.json.*.tmp
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+test-results/
+playwright-report/
+.local/
+artifacts/
+# Deployment packages must never include these local credentials/backups.
+.env.*
+!.env.example
+*.session
+*.session-journal
+memory.json.bak
+memory.json.*.tmp
 ПОЛЕЗНЫЕ КОДЫ, КОМАНДЫ И Т.Д.txt

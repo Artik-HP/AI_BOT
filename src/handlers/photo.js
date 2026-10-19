@@ -5,16 +5,18 @@ const {
   claimIncomingMessage,
   enqueueChatTask,
   downloadTelegramFile,
-  sendAIResponse
+  sendAIResponse,
+  invalidateInteractiveQuestions,
 } = require("../services/telegram");
 
-const IMAGE_ERROR_MESSAGE = "Не смог прочитать изображение. Проверь размер файла или OPENROUTER_VISION_MODEL.";
+const IMAGE_ERROR_MESSAGE =
+  "Не смог прочитать изображение. Проверь размер файла или OPENROUTER_VISION_MODEL.";
 
 const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   "image/gif",
   "image/jpeg",
   "image/png",
-  "image/webp"
+  "image/webp",
 ]);
 
 function getImageMessage(msg) {
@@ -26,7 +28,7 @@ function getImageMessage(msg) {
     return {
       fileId: photo.file_id,
       mimeType: "image/jpeg",
-      source: "photo"
+      source: "photo",
     };
   }
 
@@ -37,7 +39,7 @@ function getImageMessage(msg) {
       return {
         fileId: msg.document.file_id,
         mimeType,
-        source: "document"
+        source: "document",
       };
     }
   }
@@ -50,7 +52,10 @@ function getPhotoScore(photo) {
     return 0;
   }
 
-  return Number(photo.file_size || 0) || Number(photo.width || 0) * Number(photo.height || 0);
+  return (
+    Number(photo.file_size || 0) ||
+    Number(photo.width || 0) * Number(photo.height || 0)
+  );
 }
 
 function getSupportedMimeType(file) {
@@ -60,13 +65,16 @@ function getSupportedMimeType(file) {
     return normalizedMimeType;
   }
 
-  const extension = path.extname(file.file_name || "").slice(1).toLowerCase();
+  const extension = path
+    .extname(file.file_name || "")
+    .slice(1)
+    .toLowerCase();
   const mimeType = {
     gif: "image/gif",
     jpeg: "image/jpeg",
     jpg: "image/jpeg",
     png: "image/png",
-    webp: "image/webp"
+    webp: "image/webp",
   }[extension];
 
   return SUPPORTED_IMAGE_MIME_TYPES.has(mimeType) ? mimeType : null;
@@ -86,20 +94,32 @@ function buildImageDataUrl(imageBuffer, mimeType) {
 }
 
 async function handleImageMessage(bot, chatId, msg, image) {
+  await invalidateInteractiveQuestions(chatId).catch(() => {});
   await bot.sendChatAction(chatId, "typing");
 
   const imageBuffer = await downloadTelegramFile(image.fileId, {
     maxBytes: CONFIG.MAX_IMAGE_BYTES,
-    fileLabel: "Image"
+    fileLabel: "Image",
   });
   const imageDataUrl = buildImageDataUrl(imageBuffer, image.mimeType);
-  const prompt = msg.caption?.trim() || "Что на изображении? Опиши важные детали и ответь по сути.";
-  const aiReply = await askAIWithImage(chatId, prompt, {
-    dataUrl: imageDataUrl,
-    mimeType: image.mimeType
-  }, msg.from);
+  const prompt =
+    msg.caption?.trim() ||
+    "Что на изображении? Опиши важные детали и ответь по сути.";
+  const aiReply = await askAIWithImage(
+    msg.commandScope || chatId,
+    prompt,
+    {
+      dataUrl: imageDataUrl,
+      mimeType: image.mimeType,
+    },
+    msg.from,
+  );
 
-  await sendAIResponse(chatId, aiReply);
+  await sendAIResponse(chatId, aiReply, {
+    answerUserId: msg.from?.id,
+    model: CONFIG.VISION_MODEL,
+    memoryScope: msg.commandScope,
+  });
 }
 
 function registerPhotoHandler(bot) {
@@ -110,6 +130,7 @@ function registerPhotoHandler(bot) {
     if (!image) {
       return;
     }
+    if (!(await require("../services/access").guardMessage(bot, msg))) return;
 
     if (!claimIncomingMessage(msg)) {
       return;
@@ -117,13 +138,14 @@ function registerPhotoHandler(bot) {
 
     await enqueueChatTask(chatId, async () => {
       try {
+        msg.commandScope = `t:${chatId}:${msg.from.id}`;
         await handleImageMessage(bot, chatId, msg, image);
       } catch (error) {
         const status = error.response?.status;
-        const details = error.response?.data || error.message;
+        const details = require("../utils/errors").getErrorDetails(error);
 
         console.error("Image recognition error:", status, details);
-        await bot.sendMessage(chatId, IMAGE_ERROR_MESSAGE);
+        await bot.sendMessage(chatId, IMAGE_ERROR_MESSAGE).catch(() => {});
       }
     });
   });
@@ -134,5 +156,5 @@ module.exports = {
   getImageMessage,
   getSupportedMimeType,
   buildImageDataUrl,
-  handleImageMessage
+  handleImageMessage,
 };

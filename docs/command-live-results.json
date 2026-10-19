@@ -1,0 +1,111 @@
+{
+  "checkedAt": "2026-10-14T16:19:33.004Z",
+  "boundary": "Real AI commands, Open-Meteo and read-only Telegram/account authorization. No Telegram sends or user clicks. Isolated temporary history.",
+  "results": [
+    {
+      "name": "explain",
+      "passed": true
+    },
+    {
+      "name": "translate",
+      "passed": true
+    },
+    {
+      "name": "summarize",
+      "passed": true
+    },
+    {
+      "name": "ideas",
+      "passed": true
+    },
+    {
+      "name": "brainstorm",
+      "passed": true
+    },
+    {
+      "name": "compare",
+      "passed": true
+    },
+    {
+      "name": "joke",
+      "passed": true
+    },
+    {
+      "name": "story",
+      "passed": true
+    },
+    {
+      "name": "code",
+      "passed": true
+    },
+    {
+      "name": "debug",
+      "passed": true
+    },
+    {
+      "name": "refactor",
+      "passed": true
+    },
+    {
+      "name": "regex",
+      "passed": true
+    },
+    {
+      "name": "algorithm",
+      "passed": true
+    },
+    {
+      "name": "weather",
+      "passed": true
+    },
+    {
+      "name": "TelegramAccount:authorization",
+      "passed": false,
+      "error": "Account session unauthorized"
+    },
+    {
+      "name": "review",
+      "passed": true
+    },
+    {
+      "name": "Telegram:getMe/getWebhookInfo",
+      "passed": true
+    },
+    {
+      "name": "STT:real-audio",
+      "passed": true
+    },
+    {
+      "name": "rewrite",
+      "passed": true
+    },
+    {
+      "name": "plan",
+      "passed": true
+    },
+    {
+      "name": "prompt",
+      "passed": true
+    },
+    {
+      "name": "analyze",
+      "passed": true
+    },
+    {
+      "name": "sql",
+      "passed": true
+    },
+    {
+      "name": "debate",
+      "passed": true
+    },
+    {
+      "name": "roleplay",
+      "passed": true
+    },
+    {
+      "name": "chat",
+      "passed": true
+    }
+  ]
+}
