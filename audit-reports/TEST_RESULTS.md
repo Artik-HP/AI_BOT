@@ -10,6 +10,7 @@
 | Линтер | `npm run lint` | 0 замечаний (на baseline: 12 ошибок `no-undef`, неиспользуемый код) |
 | Все тесты, Node 22.22 | `npm test` | **163 из 163** проходят, ~35 с |
 | Все тесты, Node 20.20 | `PATH=/opt/node20/bin:$PATH npm test` | ****163 из 163** проходят, ~36 с** |
+| CI на GitHub Actions | PR #3, коммит `cc34770` (`.github/workflows/ci.yml`) | **Node 20, Node 22, Node 24 и Dependency audit — все `success`** |
 | Уязвимости | `npm audit` | **0** (baseline: 13, из них 3 critical) |
 | Целостность lock-файла | `npm ci --dry-run` | OK |
 | Те же e2e на **оригинальном** коде | `bash audit-reports/evidence/after/baseline-control.sh` | оригинал: **13 проходят / 43 падают** из 56; новый код: 56 из 56 |
@@ -78,7 +79,7 @@
 
 * Реальные Telegram и OpenRouter (форматы ответов, лимиты, доступность моделей, STT).
 * Интерактивный вход `npm run telegram:session`; живое подключение gramjs.
-* CI на GitHub, сборка devcontainer, Node 24.
+* Сборка devcontainer (нужен Docker).
 * Длительная работа (часы) и утечки памяти; нагрузка выше 100 чатов.
 
 ## 7. Как повторить
