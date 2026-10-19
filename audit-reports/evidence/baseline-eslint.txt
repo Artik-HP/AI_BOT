@@ -1,0 +1,23 @@
+
+src/services/accountAssistant.js
+  104:10  warning  'listHasPeer' is defined but never used  no-unused-vars
+
+src/services/memory.js
+  335:10  warning  'claimIncomingMessage' is defined but never used  no-unused-vars
+  342:7   error    'processedMessages' is not defined                no-undef
+  346:3   error    'processedMessages' is not defined                no-undef
+  347:20  error    'processedMessages' is not defined                no-undef
+  347:51  error    'PROCESSED_MESSAGE_TTL_MS' is not defined         no-undef
+  391:20  error    'lastAiReplies' is not defined                    no-undef
+  393:3   error    'lastAiReplies' is not defined                    no-undef
+  401:27  error    'DUPLICATE_REPLY_TTL_MS' is not defined           no-undef
+  405:16  warning  'sendAIMessage' is defined but never used         no-unused-vars
+  412:9   error    'bot' is not defined                              no-undef
+  415:10  warning  'enqueueChatTask' is defined but never used       no-unused-vars
+  417:20  error    'chatQueues' is not defined                       no-undef
+  422:11  error    'chatQueues' is not defined                       no-undef
+  423:9   error    'chatQueues' is not defined                       no-undef
+  427:3   error    'chatQueues' is not defined                       no-undef
+
+✖ 16 problems (12 errors, 4 warnings)
+

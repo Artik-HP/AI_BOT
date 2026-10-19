@@ -1,0 +1,28 @@
+RESULT {
+ "botSendCommandReplies": [
+  {
+   "chat": "-100777",
+   "text": "@peer_test_bot привет, как дела"
+  },
+  {
+   "chat": "4100",
+   "text": "Сообщение отправлено @peer_test_bot."
+  }
+ ],
+ "legacyFirstWordForm": [
+  {
+   "chat": "-100777",
+   "text": "@peer_test_bot второй вариант"
+  },
+  {
+   "chat": "4100",
+   "text": "Сообщение отправлено @peer_test_bot."
+  }
+ ],
+ "multilinePreserved": false,
+ "multilineSentText": "\"@peer_test_bot строка1 строка2 строка4\"",
+ "inboundPeerMessages": 6,
+ "repliesToPeer": 1,
+ "orCalls": 7,
+ "commandForOtherBotAnswered": true
+}

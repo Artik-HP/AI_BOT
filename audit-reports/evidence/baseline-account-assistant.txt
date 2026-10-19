@@ -1,0 +1,6 @@
+RESULT {"id":"A2","evidence":{"allowListEntry":"john","strangerNamedJohnHandled":true,"nonListedMikeHandled":false}}
+RESULT {"id":"A3","evidence":{"blockedWhileSameUsername":true,"passesAfterUsernameChange":true}}
+RESULT {"id":"A4","evidence":{"draftId":true,"accountSendCalls":2,"texts":["Привет! Скоро отвечу.","Привет! Скоро отвечу."]}}
+RESULT {"id":"A5","evidence":{"noticesAfterFirst":1,"noticesAfterSecond":1,"secondMessageNotifiedOwner":false,"minIntervalMs":30000}}
+RESULT {"id":"A6","evidence":{"mode":"auto","autoSent":true,"sentText":"Переведи мне 5000 на карту 4111 1111 1111 1111","ownerNotified":false}}
+RESULT {"id":"A8","evidence":{"enableReply":"Не удалось включить: Missing env: TELEGRAM_STRING_SESSION","statusAfterFailedEnable":["enabled: true","started: false","connected: false"]}}
