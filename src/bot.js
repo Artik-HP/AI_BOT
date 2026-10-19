@@ -150,7 +150,6 @@ function start() {
   });
 
   let shuttingDown = false;
-  let server;
 
   async function shutdown(exitCode = 0, reason = "") {
     if (shuttingDown) {
@@ -180,7 +179,7 @@ function start() {
     process.exit(exitCode);
   }
 
-  server = app.listen(CONFIG.PORT, (error) => {
+  const server = app.listen(CONFIG.PORT, (error) => {
     if (error) {
       logger.error(`Web server could not start on port ${CONFIG.PORT}:`, error);
       shutdown(1, "web server failed");

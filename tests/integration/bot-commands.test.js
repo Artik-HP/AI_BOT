@@ -205,7 +205,7 @@ test("bot-to-bot: ответы собеседнику с упоминанием,
       BOT_TO_BOT_CHAT_ID: "-100777",
       BOT_TO_BOT_TARGET_BOT_USERNAME: "Peer_Test_Bot",
       BOT_TO_BOT_ALLOW_BOTS: "peer_test_bot",
-      BOT_TO_BOT_MIN_INTERVAL_MS: "0",
+      BOT_TO_BOT_MIN_INTERVAL_MS: "1",
       BOT_TO_BOT_MAX_TURNS: "3",
       BOT_TO_BOT_WINDOW_MS: "60000"
     }

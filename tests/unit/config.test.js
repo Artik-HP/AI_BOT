@@ -53,6 +53,21 @@ test("мусор в числовых переменных: предупрежд�
   assert.ok(Number.isFinite(config.MAX_AUDIO_BYTES));
 });
 
+test("нулевые паузы и интервалы допустимы (раньше 0 молча заменялся значением по умолчанию)", () => {
+  const { config, warnings } = build({
+    BOT_TO_BOT_MIN_INTERVAL_MS: "0",
+    ACCOUNT_ASSISTANT_REPLY_DELAY_MS: "0",
+    ACCOUNT_ASSISTANT_MIN_INTERVAL_MS: "0",
+    MEMORY_SAVE_DEBOUNCE_MS: "0"
+  });
+
+  assert.equal(config.BOT_TO_BOT_MIN_INTERVAL_MS, 0);
+  assert.equal(config.ACCOUNT_ASSISTANT_REPLY_DELAY_MS, 0);
+  assert.equal(config.ACCOUNT_ASSISTANT_MIN_INTERVAL_MS, 0);
+  assert.equal(config.MEMORY_SAVE_DEBOUNCE_MS, 0);
+  assert.deepEqual(warnings, []);
+});
+
 test("PORT=0 допустим (случайный порт), 70000 - нет", () => {
   assert.equal(build({ PORT: "0" }).config.PORT, 0);
   assert.equal(build({ PORT: "70000" }).config.PORT, 12722);

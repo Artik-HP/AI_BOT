@@ -25,7 +25,7 @@ let saveGeneration = 0;
 let lastBackupAt = 0;
 let lastSaveFailed = false;
 let dirty = false;
-let users = loadMemory();
+const users = loadMemory();
 
 process.once("beforeExit", flushMemory);
 

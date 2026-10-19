@@ -21,9 +21,10 @@ function freePort() {
   });
 }
 
-// `legacy: true` runs the pre-audit code (APP_ROOT=baseline checkout), which cannot be pointed at the
-// fakes through environment variables, via the redirect shim from the audit evidence.
-async function launchApp({ tg, or, env = {}, entry = "index.js", legacy = false, port }) {
+// LEGACY_BASELINE=1 (with APP_ROOT=<pre-audit checkout>) runs the pre-audit code, which cannot be pointed
+// at the fakes through environment variables, via the redirect shim from the audit evidence.
+// It is how the audit proves that these tests fail on the old code.
+async function launchApp({ tg, or, env = {}, entry = "index.js", legacy = process.env.LEGACY_BASELINE === "1", port }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aibot-it-"));
   const appPort = port || await freePort();
   const mergedEnv = {
