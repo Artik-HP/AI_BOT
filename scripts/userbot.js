@@ -1,27 +1,36 @@
-require("dotenv").config();
+const logger = require("../src/utils/logger");
+const { buildConfig, parseBoolean } = require("../src/config");
+const { safeHandler } = require("../src/utils/safe");
 
-const { TelegramClient } = require("telegram");
-const { StringSession } = require("telegram/sessions");
-const { NewMessage } = require("telegram/events");
+// A reply that starts with the command prefix would be parsed as a command again when the
+// account sees its own message, and ".say .say x" would loop forever. A zero-width space breaks the prefix.
+const ZERO_WIDTH_SPACE = String.fromCodePoint(0x200b);
 
-const apiId = Number(process.env.TELEGRAM_API_ID);
-const apiHash = process.env.TELEGRAM_API_HASH;
-const session = process.env.TELEGRAM_STRING_SESSION;
-const startMessage = process.env.USERBOT_START_MESSAGE || "Userbot started.";
-const sendSelfOnStart = process.env.USERBOT_SEND_SELF === "true";
+function readSettings(env = process.env, warn = logger.warn) {
+  const config = buildConfig(env, warn);
 
-function validateEnv() {
+  return {
+    apiId: config.TELEGRAM_API_ID,
+    apiHash: config.TELEGRAM_API_HASH,
+    session: config.TELEGRAM_STRING_SESSION,
+    allowedUserIds: config.USERBOT_ALLOWED_USER_IDS,
+    startMessage: env.USERBOT_START_MESSAGE || "Userbot started.",
+    sendSelfOnStart: parseBoolean(env.USERBOT_SEND_SELF) === true
+  };
+}
+
+function validateSettings(settings) {
   const missing = [];
 
-  if (!Number.isFinite(apiId) || apiId <= 0) {
+  if (!Number.isFinite(settings.apiId) || settings.apiId <= 0) {
     missing.push("TELEGRAM_API_ID");
   }
 
-  if (!apiHash) {
+  if (!settings.apiHash) {
     missing.push("TELEGRAM_API_HASH");
   }
 
-  if (!session) {
+  if (!settings.session) {
     missing.push("TELEGRAM_STRING_SESSION");
   }
 
@@ -39,7 +48,7 @@ function normalizeText(text) {
 
 function parseCommand(text) {
   const raw = normalizeText(text);
-  const match = raw.match(/^[./](\w+)(?:\s+([\s\S]+))?$/);
+  const match = raw.match(/^\.(\w+)(?:\s+([\s\S]+))?$/);
 
   if (!match) {
     return null;
@@ -49,6 +58,21 @@ function parseCommand(text) {
     name: match[1].toLowerCase(),
     args: normalizeText(match[2] || "")
   };
+}
+
+// Commands act as the account owner, so they obey only the owner: messages the account sent itself
+// (from any of the owner's devices) and, optionally, the explicitly listed user ids.
+function isAuthorized(message, allowedUserIds = []) {
+  if (message.out) {
+    return true;
+  }
+
+  const senderId = message.senderId == null ? "" : String(message.senderId);
+  return Boolean(senderId) && allowedUserIds.includes(senderId);
+}
+
+function neutralizeCommandPrefix(text) {
+  return text.startsWith(".") ? `${ZERO_WIDTH_SPACE}${text}` : text;
 }
 
 function buildHelpText() {
@@ -65,15 +89,14 @@ function buildHelpText() {
   ].join("\n");
 }
 
-function buildStatusText(me, client) {
+function buildStatusText(me, client, settings) {
   return [
     "Userbot статус:",
     `Username: ${me.username || "<none>"}`,
     `Name: ${[me.firstName, me.lastName].filter(Boolean).join(" ") || "<unknown>"}`,
     `User ID: ${me.id?.toString() || "<unknown>"}`,
-    `Session: ${session ? "loaded" : "missing"}`,
-    `Telegram API ID: ${apiId}`,
-    `Connected: ${client?.isConnected ? "yes" : "no"}`,
+    `Session: ${settings.session ? "loaded" : "missing"}`,
+    `Connected: ${client?.connected ? "yes" : "no"}`,
     `Environment: ${process.env.NODE_ENV || "development"}`
   ].join("\n");
 }
@@ -86,7 +109,7 @@ async function safeReply(message, text) {
   try {
     await message.reply({ message: text });
   } catch (error) {
-    console.error("Failed to reply:", error.message || error);
+    logger.error("Failed to reply:", error);
   }
 }
 
@@ -94,11 +117,11 @@ async function safeSendSelf(client, text) {
   try {
     await client.sendMessage("me", { message: text });
   } catch (error) {
-    console.error("Failed to send self message:", error.message || error);
+    logger.error("Failed to send self message:", error);
   }
 }
 
-async function handleCommand(client, event, command) {
+async function handleCommand(client, event, command, settings) {
   const message = event.message;
 
   switch (command.name) {
@@ -110,21 +133,13 @@ async function handleCommand(client, event, command) {
       await safeReply(message, "pong");
       break;
 
-    case "say": {
-      if (!command.args) {
-        await safeReply(message, "Использование: .say <текст>");
-        return;
-      }
-      await safeReply(message, command.args);
-      break;
-    }
-
+    case "say":
     case "echo": {
       if (!command.args) {
-        await safeReply(message, "Использование: .echo <текст>");
+        await safeReply(message, `Использование: .${command.name} <текст>`);
         return;
       }
-      await safeReply(message, command.args);
+      await safeReply(message, neutralizeCommandPrefix(command.args));
       break;
     }
 
@@ -137,7 +152,7 @@ async function handleCommand(client, event, command) {
 
     case "status": {
       const me = await client.getMe();
-      await safeReply(message, buildStatusText(me, client));
+      await safeReply(message, buildStatusText(me, client, settings));
       break;
     }
 
@@ -152,70 +167,96 @@ async function handleCommand(client, event, command) {
     }
 
     default:
-      console.log("Unknown command:", command.name);
+      logger.debug("Unknown userbot command:", command.name);
       break;
   }
 }
 
-async function handleIncomingMessage(client, event) {
+// Strangers get no reaction at all: not even a hint that the account runs a userbot.
+async function handleIncomingMessage(client, event, settings) {
   const message = event.message;
 
-  if (!message || message.out) {
+  if (!message) {
     return;
   }
 
-  const text = normalizeText(message.message || message.text || message.rawText);
+  const command = parseCommand(message.message || message.text || message.rawText);
 
-  if (!text) {
+  if (!command || !isAuthorized(message, settings.allowedUserIds)) {
     return;
   }
 
-  const command = parseCommand(text);
-
-  if (command) {
-    await handleCommand(client, event, command);
-    return;
-  }
-
-  if (text.toLowerCase().includes("userbot")) {
-    await safeReply(message, "Я работаю как userbot. Напиши .help для списка команд.");
-  }
+  await handleCommand(client, event, command, settings);
 }
 
-async function startUserbot() {
-  validateEnv();
+async function startUserbot(env = process.env) {
+  const settings = readSettings(env);
+
+  validateSettings(settings);
+
+  const { TelegramClient } = require("telegram");
+  const { StringSession } = require("telegram/sessions");
+  const { NewMessage } = require("telegram/events");
 
   const client = new TelegramClient(
-    new StringSession(session),
-    apiId,
-    apiHash,
+    new StringSession(settings.session),
+    settings.apiId,
+    settings.apiHash,
     { connectionRetries: 5 }
   );
 
-  client.addEventHandler((event) => handleIncomingMessage(client, event), new NewMessage({ incoming: true }));
+  // No `incoming` filter: the owner's own messages are commands too.
+  client.addEventHandler(
+    safeHandler("Userbot message handler", (event) => handleIncomingMessage(client, event, settings)),
+    new NewMessage({})
+  );
+
+  process.on("unhandledRejection", (error) => {
+    logger.error("Unhandled rejection:", error);
+  });
 
   await client.connect();
 
   const me = await client.getMe();
-  console.log("Userbot connected as", me.username || `${me.firstName || ""} ${me.lastName || ""}`.trim());
-  console.log(startMessage);
+  logger.info("Userbot connected as", me.username || `${me.firstName || ""} ${me.lastName || ""}`.trim());
+  logger.info(settings.startMessage);
+  logger.info(settings.allowedUserIds.length
+    ? `Команды принимаются от аккаунта и от пользователей: ${settings.allowedUserIds.join(", ")}`
+    : "Команды принимаются только от самого аккаунта (USERBOT_ALLOWED_USER_IDS не задан).");
 
-  if (sendSelfOnStart) {
-    await safeSendSelf(client, startMessage);
+  if (settings.sendSelfOnStart) {
+    await safeSendSelf(client, settings.startMessage);
   }
 
-  process.on("SIGINT", async () => {
-    console.log("Stopping userbot...");
-    await client.disconnect();
-    process.exit(0);
-  });
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.once(signal, async () => {
+      logger.info("Stopping userbot...");
+      await client.disconnect().catch(() => {});
+      process.exit(0);
+    });
+  }
 
-  process.on("unhandledRejection", (error) => {
-    console.error("Unhandled rejection:", error);
-  });
+  return client;
 }
 
-startUserbot().catch((error) => {
-  console.error("Userbot failed to start:", error.message || error);
-  process.exit(1);
-});
+module.exports = {
+  readSettings,
+  validateSettings,
+  parseCommand,
+  isAuthorized,
+  neutralizeCommandPrefix,
+  buildHelpText,
+  buildStatusText,
+  handleCommand,
+  handleIncomingMessage,
+  startUserbot
+};
+
+if (require.main === module) {
+  require("dotenv").config();
+
+  startUserbot().catch((error) => {
+    logger.error("Userbot failed to start:", error);
+    process.exit(1);
+  });
+}
