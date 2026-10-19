@@ -2,7 +2,7 @@
 // Mutation check: break one fix at a time in a throwaway copy of the project and make sure the test suite notices.
 // A mutation that leaves the suite green means the fix is not protected by a test.
 //
-//   node audit-reports/evidence/after/mutation-check.js [--only M01,M05] [--jobs 3]
+//   node audit-reports/evidence/after/mutation-check.js [--only M01,M05] [--jobs 3] [--out results.json]
 const { spawn, execFileSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
@@ -50,17 +50,27 @@ const MUTATIONS = [
   { id: "M36", finding: "S2-01", what: "getMe не повторяется после сбоя при старте", file: "src/services/telegram.js", find: "if (attempt >= IDENTITY_MAX_ATTEMPTS || currentBot !== bot) {", replace: "if (true) {" },
   { id: "M37", finding: "S2-02", what: "ошибки опроса пишутся в лог каждую секунду", file: "src/bot.js", find: "if (current - lastLoggedAt < POLLING_ERROR_LOG_INTERVAL_MS) {", replace: "if (false) {" },
   { id: "M38", finding: "S2-03", what: "разбор ответа модели снова квадратичный на длинной серии пробелов", file: "src/services/openrouter.js", find: "const cleanText = trimLineEnds(String(text || \"\").replace(/\\r\\n/g, \"\\n\")).trim();", replace: "const cleanText = String(text || \"\").replace(/\\r\\n/g, \"\\n\").replace(/[ \\t]+\\n/g, \"\\n\").trim();" },
+  { id: "M39", finding: "S2-08", what: "LOG_LEVEL/LOG_MESSAGES не проходят проверку в buildConfig", file: "src/config.js", find: "LOG_LEVEL: readEnum(env, \"LOG_LEVEL\", logger.LEVEL_NAMES, \"info\", warn),", replace: "LOG_LEVEL: \"info\"," },
+  { id: "M40", finding: "S2-09", what: "ответ на голос от бота без reply-to и упоминания", file: "src/handlers/voice.js", find: ", ...getBotToBotReplyOptions(msg) }", replace: " }" },
+  { id: "M41", finding: "S2-09", what: "ответ на фото от бота без reply-to и упоминания", file: "src/handlers/photo.js", find: ", ...getBotToBotReplyOptions(msg) }", replace: " }" },
+  { id: "M42", finding: "S2-10", what: "ожидающие сообщения троттлинга теряются при остановке", file: "src/services/accountAssistant.js", find: "    clearTimeout(burst.timer);\n    flushBurst(key);", replace: "    clearTimeout(burst.timer);" },
+  { id: "M43", finding: "S2-11", what: "disable во время подключения проигрывает более раннему enable", file: "src/services/accountAssistant.js", find: "  if (generation !== lifecycleGeneration) {", replace: "  if (false) {" },
+  { id: "M44", finding: "S2-12", what: "другая ошибка опроса подавляется как «такая же»", file: "src/bot.js", find: "const repeat = signature === lastSignature;", replace: "const repeat = true;" },
+  { id: "M45", finding: "S2-13", what: "уведомление об обрезке режет эмодзи", file: "src/services/telegram.js", find: "cutSafely(kept[last], TELEGRAM_MESSAGE_LIMIT - TRUNCATION_NOTICE.length)", replace: "kept[last].slice(0, TELEGRAM_MESSAGE_LIMIT - TRUNCATION_NOTICE.length)" },
+  { id: "M46", finding: "S2-14", what: "стенд не перезапускает бота при занятом порте (плавающий сбой CI)", file: "tests/helpers/app.js", find: "if (!portTaken || attempt >= MAX_LAUNCH_ATTEMPTS) {", replace: "if (true) {" },
   { id: "M35", finding: "F010", what: "лимит max_tokens снят", file: "src/services/openrouter.js", find: "max_tokens", replace: "max_tokens_disabled" }
 ];
 
 function parseArgs(argv) {
-  const args = { only: null, jobs: 3 };
+  const args = { only: null, jobs: 3, out: path.join(__dirname, "mutation-results.json") };
 
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--only") {
       args.only = new Set(argv[++i].split(","));
     } else if (argv[i] === "--jobs") {
       args.jobs = Number(argv[++i]) || 3;
+    } else if (argv[i] === "--out") {
+      args.out = path.resolve(argv[++i]);
     }
   }
 
@@ -181,7 +191,7 @@ async function main() {
   const notApplied = results.filter((result) => result.status === "NOT_APPLIED");
 
   console.log(`\nИтого: убито ${killed} из ${results.length}; выжило ${survived.length}; не применилось ${notApplied.length}`);
-  fs.writeFileSync(path.join(__dirname, "mutation-results.json"), JSON.stringify(results.map(({ id, finding, what, status, failed, note }) => ({ id, finding, what, status, failed, note })), null, 2));
+  fs.writeFileSync(args.out, JSON.stringify(results.map(({ id, finding, what, status, failed, note }) => ({ id, finding, what, status, failed, note })), null, 2));
   process.exit(survived.length || notApplied.length ? 1 : 0);
 }
 

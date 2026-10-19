@@ -236,3 +236,43 @@ test("остановка опроса настоящая: после неё не
     await tg.stop();
   }
 });
+
+test("уведомление об обрезке не разрезает эмодзи на границе (ревью Codex, P2)", async () => {
+  const tg = await new FakeTelegram().start();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aibot-svc-"));
+  const telegram = loadFresh("services/telegram", {
+    BOT_TOKEN: tg.token,
+    TELEGRAM_API_BASE_URL: tg.url,
+    OPENROUTER_API_KEY: TEST_OPENROUTER_KEY,
+    MEMORY_FILE: path.join(dir, "memory.json"),
+    MEMORY_SAVE_DEBOUNCE_MS: "60000",
+    MAX_REPLY_PARTS: "1",
+    LOG_LEVEL: "silent"
+  });
+  const bot = telegram.createTelegramBot();
+  const notice = "\n\n[ответ слишком длинный, остаток отброшен]";
+  const handedToLibrary = [];
+
+  // Проверяем то, что код отдаёт библиотеке: по дороге через HTTP кодировщик форм сам "чинит" одинокий суррогат,
+  // и на стороне сервера нарушение уже не видно.
+  bot.sendMessage = async (chatId, text) => {
+    handedToLibrary.push(text);
+    return { message_id: 1 };
+  };
+
+  try {
+    // эмодзи занимает позиции L-1 и L, где L - место, на котором ставится уведомление
+    const boundary = 4096 - notice.length;
+    const reply = `${"а".repeat(boundary - 1)}${String.fromCodePoint(0x1f600)}${"б".repeat(6000)}`;
+
+    await telegram.sendAIResponse(778, reply);
+
+    assert.equal(handedToLibrary.length, 1);
+    assert.ok(handedToLibrary[0].endsWith(notice.trim()));
+    assert.ok(handedToLibrary[0].isWellFormed(), "в тексте осталась половина эмодзи");
+    assert.ok(handedToLibrary[0].length <= 4096);
+  } finally {
+    await telegram.stopTelegramPolling(bot);
+    await tg.stop();
+  }
+});

@@ -30,13 +30,17 @@ const BASE_ENV = {
   LOG_LEVEL: "silent"
 };
 
-function createFakeClient({ sendDelay = 0, authorized = true } = {}) {
+function createFakeClient({ sendDelay = 0, authorized = true, connectDelay = 0 } = {}) {
   return {
     handlers: [],
     sent: [],
     connected: false,
     connectCalls: 0,
     async connect() {
+      if (connectDelay) {
+        await sleep(connectDelay);
+      }
+
       this.connectCalls += 1;
       this.connected = true;
     },
@@ -632,6 +636,71 @@ test("команды ассистента, адресованные другом
   } finally {
     await telegram.stopTelegramPolling(controlBot);
     await tg.stop();
+    await t.close();
+  }
+});
+
+test("/account_disable во время медленного подключения побеждает более раннее /account_enable (ревью Codex, P1)", async () => {
+  const t = await boot({ env: { ACCOUNT_ASSISTANT_ENABLED: "false" }, clientOptions: { connectDelay: 200 } });
+
+  try {
+    const enabling = t.bot.text(OWNER, "/account_enable");
+
+    await sleep(50);
+    await t.bot.text(OWNER, "/account_disable");
+    await enabling;
+
+    await t.bot.text(OWNER, "/account_status");
+    assert.match(t.bot.lastText(), /enabled: false/);
+    assert.match(t.bot.lastText(), /connected: false/);
+    assert.equal(t.client.connected, false, "подключение, дождавшееся своего конца после disable, закрыто");
+    assert.ok(!t.bot.sent.some((entry) => /включён и готов/.test(entry.text)), "владельцу не сообщили ложное «включён»");
+
+    await t.handle(incoming({ chatId: 991, username: "late_friend", text: "привет" }));
+    assert.equal(t.noticeCount(), 0, "после disable входящие не обрабатываются");
+  } finally {
+    await t.close();
+  }
+});
+
+test("enable -> disable -> enable подряд: побеждает последняя команда, подключение одно (ревью Codex, P1)", async () => {
+  const t = await boot({ env: { ACCOUNT_ASSISTANT_ENABLED: "false" }, clientOptions: { connectDelay: 200 } });
+
+  try {
+    const first = t.bot.text(OWNER, "/account_enable");
+
+    await sleep(30);
+
+    const second = t.bot.text(OWNER, "/account_disable");
+
+    await sleep(30);
+
+    const third = t.bot.text(OWNER, "/account_enable");
+
+    await Promise.all([first, second, third]);
+
+    await t.bot.text(OWNER, "/account_status");
+    assert.match(t.bot.lastText(), /enabled: true/);
+    assert.match(t.bot.lastText(), /connected: true/);
+    assert.equal(t.client.connectCalls, 1);
+  } finally {
+    await t.close();
+  }
+});
+
+test("остановка: сообщение, ожидавшее своего окна троттлинга, не теряется, а получает черновик (ревью Codex, P2)", async () => {
+  const t = await boot({ env: { ACCOUNT_ASSISTANT_MIN_INTERVAL_MS: "60000" } });
+
+  try {
+    await t.handle(incoming({ chatId: 995, username: "bursty_friend", text: "первое" }));
+    await t.handle(incoming({ chatId: 995, username: "bursty_friend", text: "второе, пока окно не прошло" }));
+    assert.equal(t.noticeCount(), 1, "второе сообщение ждёт своего окна");
+
+    await t.assistant.stopAccountAssistant();
+
+    assert.equal(t.noticeCount(), 2, "при остановке ожидавшее сообщение превратилось в черновик");
+    assert.match(t.bot.sent.at(-1).text, /второе, пока окно не прошло/);
+  } finally {
     await t.close();
   }
 });

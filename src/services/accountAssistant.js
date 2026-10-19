@@ -32,6 +32,8 @@ let eventFilterFactory = () => {
 
 let accountClient = null;
 let connecting = null;
+let lifecycleGeneration = 0;
+let desiredEnabled = Boolean(CONFIG.ACCOUNT_ASSISTANT_ENABLED);
 let controlBot = null;
 let started = false;
 let handlersRegistered = false;
@@ -855,9 +857,23 @@ async function disconnectClient() {
   }
 }
 
+// The latest /account_enable or /account_disable wins. Opening the connection can take long, and a disable that
+// arrives meanwhile finds no client to close: whoever finishes connecting afterwards must notice that and clean up.
 async function enableAccountAssistant(chatId) {
+  const generation = ++lifecycleGeneration;
+
+  desiredEnabled = true;
+
   if (!accountClient) {
     await connectAccountAssistant();
+  }
+
+  if (generation !== lifecycleGeneration) {
+    if (!desiredEnabled) {
+      await disconnectClient();
+    }
+
+    return;
   }
 
   accountAssistantEnabled = true;
@@ -866,6 +882,8 @@ async function enableAccountAssistant(chatId) {
 }
 
 async function disableAccountAssistant(chatId) {
+  lifecycleGeneration += 1;
+  desiredEnabled = false;
   accountAssistantEnabled = false;
   await disconnectClient();
 
@@ -880,13 +898,14 @@ async function waitForAccountTasks(timeoutMs = TASKS_GRACE_MS) {
   ]);
 }
 
-// Called on shutdown: releases the Telegram connection and timers.
+// Called on shutdown: releases the Telegram connection and timers. Messages that were held back by the
+// throttle are already consumed from Telegram, so they get their draft now instead of being lost.
 async function stopAccountAssistant() {
-  for (const burst of pendingBursts.values()) {
+  for (const [key, burst] of Array.from(pendingBursts.entries())) {
     clearTimeout(burst.timer);
+    flushBurst(key);
   }
 
-  pendingBursts.clear();
   await waitForAccountTasks();
   await disconnectClient();
 }

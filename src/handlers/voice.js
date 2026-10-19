@@ -7,6 +7,7 @@ const {
   claimIncomingMessage,
   enqueueChatTask,
   downloadTelegramFile,
+  getBotToBotReplyOptions,
   isFileTooLargeError,
   sendAIResponse
 } = require("../services/telegram");
@@ -83,7 +84,7 @@ async function handleAudioMessage(bot, chatId, msg, audio) {
     : transcript;
 
   const aiReply = await askAI(chatId, userText, msg.from);
-  await sendAIResponse(chatId, aiReply, { sourceMessageId: msg.message_id });
+  await sendAIResponse(chatId, aiReply, { sourceMessageId: msg.message_id, ...getBotToBotReplyOptions(msg) });
 }
 
 function registerVoiceHandler(bot) {

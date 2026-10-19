@@ -7,6 +7,7 @@ const {
   claimIncomingMessage,
   enqueueChatTask,
   downloadTelegramFile,
+  getBotToBotReplyOptions,
   isFileTooLargeError,
   sendAIResponse
 } = require("../services/telegram");
@@ -119,7 +120,7 @@ async function handleImageMessage(bot, chatId, msg, image) {
     mimeType: image.mimeType
   }, msg.from);
 
-  await sendAIResponse(chatId, aiReply, { sourceMessageId: msg.message_id });
+  await sendAIResponse(chatId, aiReply, { sourceMessageId: msg.message_id, ...getBotToBotReplyOptions(msg) });
 }
 
 function registerPhotoHandler(bot) {

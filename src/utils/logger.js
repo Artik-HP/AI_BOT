@@ -1,5 +1,6 @@
 const { describeError } = require("./errors");
 const { redact } = require("./redact");
+const { parseBoolean } = require("./parse");
 
 const LEVELS = {
   debug: 10,
@@ -21,9 +22,7 @@ function currentLevel() {
 }
 
 function messageLoggingEnabled() {
-  return ["1", "true", "yes", "y", "on"].includes(
-    String(process.env.LOG_MESSAGES || "").trim().toLowerCase()
-  );
+  return parseBoolean(process.env.LOG_MESSAGES) === true;
 }
 
 function formatArg(arg) {
@@ -85,6 +84,7 @@ function setOutput(replacement) {
 }
 
 module.exports = {
+  LEVEL_NAMES: Object.keys(LEVELS),
   debug,
   info,
   warn,

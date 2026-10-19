@@ -5,7 +5,7 @@ const logger = require("../utils/logger");
 const { ApiError, toSafeError } = require("../utils/errors");
 const { createKeyedQueue } = require("../utils/queue");
 const { createTtlSet } = require("../utils/ttlSet");
-const { TELEGRAM_MESSAGE_LIMIT, splitMessage } = require("../utils/text");
+const { TELEGRAM_MESSAGE_LIMIT, cutSafely, splitMessage } = require("../utils/text");
 const { dedupeRepeatedReply } = require("./memory");
 
 const processedMessages = createTtlSet(CONFIG.PROCESSED_MESSAGE_TTL_MS);
@@ -254,7 +254,7 @@ function limitReplyParts(parts) {
   const kept = parts.slice(0, CONFIG.MAX_REPLY_PARTS);
   const last = kept.length - 1;
 
-  kept[last] = `${kept[last].slice(0, TELEGRAM_MESSAGE_LIMIT - TRUNCATION_NOTICE.length).trimEnd()}${TRUNCATION_NOTICE}`;
+  kept[last] = `${cutSafely(kept[last], TELEGRAM_MESSAGE_LIMIT - TRUNCATION_NOTICE.length).trimEnd()}${TRUNCATION_NOTICE}`;
   return kept;
 }
 

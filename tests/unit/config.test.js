@@ -161,3 +161,19 @@ test("validateConfig: собирает все проблемы сразу", () =
   assert.throws(() => validateConfig({ BOT_TOKEN: "не-токен", OPENROUTER_API_KEY: VALID_KEY }), /неверный формат/);
   assert.throws(() => validateConfig({ BOT_TOKEN: VALID_TOKEN, OPENROUTER_API_KEY: "sk or key" }), /пробел/);
 });
+
+test("LOG_LEVEL и LOG_MESSAGES проходят ту же проверку, что и остальные настройки (ревью Codex, P1)", () => {
+  const clean = build({ LOG_LEVEL: "DEBUG", LOG_MESSAGES: "yes" });
+
+  assert.deepEqual(clean.warnings, []);
+  assert.equal(clean.config.LOG_LEVEL, "debug");
+  assert.equal(clean.config.LOG_MESSAGES, true);
+
+  const typo = build({ LOG_LEVEL: "debg", LOG_MESSAGES: "tru" });
+
+  assert.equal(typo.config.LOG_LEVEL, "info", "опечатка не отключает логи молча");
+  assert.equal(typo.config.LOG_MESSAGES, false, "опечатка не включает логирование текстов");
+  assert.equal(typo.warnings.length, 2);
+  assert.match(typo.warnings.join("\n"), /LOG_LEVEL/);
+  assert.match(typo.warnings.join("\n"), /LOG_MESSAGES/);
+});

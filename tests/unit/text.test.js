@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { sanitizeInline, splitMessage, trimLineEnds } = require("../../src/utils/text");
+const { cutSafely, sanitizeInline, splitMessage, trimLineEnds } = require("../../src/utils/text");
 
 const stripSpace = (text) => text.replace(/\s+/g, "");
 const char = (codePoint) => String.fromCodePoint(codePoint);
@@ -89,4 +89,15 @@ test("trimLineEnds: убирает хвостовые пробелы постр�
   assert.equal(trimLineEnds(" ".repeat(1_000_000)), "");
   assert.equal(trimLineEnds(`a${" ".repeat(1_000_000)}b`).length, 1_000_002);
   assert.ok(Date.now() - started < 1500, `слишком медленно: ${Date.now() - started} мс`);
+});
+
+test("cutSafely: не оставляет половину суррогатной пары на конце среза", () => {
+  const text = `ab${char(0x1f600)}cd`;
+
+  assert.equal(cutSafely(text, 10), text, "короткий текст не меняется");
+  assert.equal(cutSafely(text, 3), "ab", "срез посреди эмодзи отступает на один знак");
+  assert.equal(cutSafely(text, 4), `ab${char(0x1f600)}`, "срез ровно после эмодзи сохраняет его");
+  assert.equal(cutSafely(text, 2), "ab");
+  assert.equal(cutSafely(text, 0), "");
+  assert.ok(cutSafely(char(0x1f600).repeat(50), 51).isWellFormed());
 });

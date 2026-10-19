@@ -57,6 +57,21 @@ function splitMessage(text, requestedLimit = TELEGRAM_MESSAGE_LIMIT) {
   return chunks.filter((chunk) => chunk.trim().length > 0);
 }
 
+// Cuts to at most `maxLength` UTF-16 units without leaving half of a surrogate pair (an emoji) at the end.
+function cutSafely(text, maxLength) {
+  const source = String(text ?? "");
+
+  if (source.length <= maxLength) {
+    return source;
+  }
+
+  const cut = source.charCodeAt(maxLength - 1) >= 0xd800 && source.charCodeAt(maxLength - 1) <= 0xdbff
+    ? maxLength - 1
+    : maxLength;
+
+  return source.slice(0, Math.max(0, cut));
+}
+
 // Telegram first/last names and similar profile fields go into prompts, so keep them short and flat.
 function sanitizeInline(value, maxLength = 32) {
   const flat = String(value ?? "")
@@ -88,5 +103,6 @@ module.exports = {
   TELEGRAM_MESSAGE_LIMIT,
   sanitizeInline,
   splitMessage,
+  cutSafely,
   trimLineEnds
 };

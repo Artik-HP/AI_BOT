@@ -1,8 +1,7 @@
 const path = require("path");
 const logger = require("./utils/logger");
+const { parseBoolean } = require("./utils/parse");
 
-const TRUE_VALUES = new Set(["1", "true", "yes", "y", "on"]);
-const FALSE_VALUES = new Set(["0", "false", "no", "n", "off"]);
 const ACCOUNT_ASSISTANT_MODES = ["approval", "auto", "dry-run"];
 const BOT_TOKEN_PATTERN = /^\d{5,}:[\w-]{20,}$/;
 const CHAT_ID_PATTERN = /^-?\d+$/;
@@ -14,17 +13,6 @@ const PLACEHOLDER_PATTERN =
 // Values copied from .env.example or docs without being filled in ("process.env.BOT_TOKEN", "your_token", ...).
 function isPlaceholder(value) {
   return PLACEHOLDER_PATTERN.test(String(value ?? ""));
-}
-
-// true / false for recognised words, null otherwise. A typo must not silently turn into "false".
-function parseBoolean(value) {
-  const word = String(value ?? "").trim().toLowerCase();
-
-  if (TRUE_VALUES.has(word)) {
-    return true;
-  }
-
-  return FALSE_VALUES.has(word) ? false : null;
 }
 
 function clean(env, name) {
@@ -227,6 +215,11 @@ function buildConfig(env = process.env, warn = logger.warn) {
     BOT_TO_BOT_MAX_TURNS: readNumber(env, "BOT_TO_BOT_MAX_TURNS", 6, warn, { min: 1, integer: true }),
     BOT_TO_BOT_WINDOW_MS: readNumber(env, "BOT_TO_BOT_WINDOW_MS", 2 * 60 * 1000, warn, { min: 1, integer: true }),
     BOT_TO_BOT_MIN_INTERVAL_MS: readNumber(env, "BOT_TO_BOT_MIN_INTERVAL_MS", 2000, warn, { min: 0, integer: true }),
+
+    // The logger reads these two on every call (it sits below config in the dependency graph); they are parsed
+    // here as well so that a typo gets the same warning as any other setting.
+    LOG_LEVEL: readEnum(env, "LOG_LEVEL", logger.LEVEL_NAMES, "info", warn),
+    LOG_MESSAGES: readBoolean(env, "LOG_MESSAGES", false, warn),
 
     ACCOUNT_ASSISTANT_ENABLED: readBoolean(env, "ACCOUNT_ASSISTANT_ENABLED", false, warn),
     ACCOUNT_ASSISTANT_MODE: readEnum(env, "ACCOUNT_ASSISTANT_MODE", ACCOUNT_ASSISTANT_MODES, "approval", warn),

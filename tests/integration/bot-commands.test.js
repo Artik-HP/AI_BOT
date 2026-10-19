@@ -287,3 +287,41 @@ test("/account_private: опечатка не меняет значение, а 
     assert.match((await say(tg, OWNER, "/account_private"))[0].text, /privateOnly: false/);
   });
 });
+
+test("bot-to-bot: ответ на фото и голос от бота уходит с reply-to и упоминанием (ревью Codex, P2)", async () => {
+  await withApp({
+    env: {
+      BOT_TO_BOT_ENABLED: "true",
+      BOT_TO_BOT_OWNER_CHAT_ID: String(OWNER),
+      BOT_TO_BOT_CHAT_ID: "-100777",
+      BOT_TO_BOT_TARGET_BOT_USERNAME: "Peer_Test_Bot",
+      BOT_TO_BOT_ALLOW_BOTS: "peer_test_bot",
+      BOT_TO_BOT_MIN_INTERVAL_MS: "1",
+      BOT_TO_BOT_MAX_TURNS: "10",
+      BOT_TO_BOT_WINDOW_MS: "60000"
+    }
+  }, async ({ tg, or }) => {
+    or.chat = () => reply("ответ на вложение");
+    or.stt = () => ({ status: 200, body: { text: "расшифровка голоса пира" } });
+    tg.addFile("bot-photo", "photos/peer.jpg", Buffer.alloc(2000, 3));
+    tg.addFile("bot-voice", "voice/peer.oga", Buffer.alloc(3000, 4));
+    await tg.waitFor(() => tg.calls.some((call) => call.method === "getMe"), 5000, "getMe");
+    await tg.quiet(300);
+
+    const peer = { chatId: -100777, fromId: 9001, isBot: true, firstName: "Peer", username: "peer_test_bot", chatType: "supergroup" };
+    const photo = tg.message({ ...peer, caption: "@test_audit_bot что на фото?", photo: [{ file_id: "bot-photo", file_unique_id: "p", width: 10, height: 10, file_size: 2000 }] });
+
+    await tg.waitFor(() => tg.texts().length >= 1, 10000, "ответ на фото");
+
+    const voice = tg.message({ ...peer, caption: "@test_audit_bot послушай", voice: { file_id: "bot-voice", file_unique_id: "v", duration: 2, mime_type: "audio/ogg", file_size: 3000 } });
+
+    await tg.waitFor(() => tg.texts().length >= 2, 10000, "ответ на голос");
+
+    const [photoReply, voiceReply] = tg.sent();
+
+    for (const [sentReply, incoming] of [[photoReply, photo], [voiceReply, voice]]) {
+      assert.match(sentReply.text, /^@peer_test_bot ответ на вложение/);
+      assert.equal(Number(sentReply.reply_to_message_id), incoming.message_id, "ответ привязан к сообщению бота");
+    }
+  });
+});

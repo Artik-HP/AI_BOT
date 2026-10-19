@@ -63,27 +63,41 @@ function createWebApp({ getDetails }) {
 // would bury the log (and hide the real cause), so equal failures are summarised once per interval.
 function createPollingErrorLogger(now = Date.now) {
   let lastLoggedAt = 0;
+  let lastSignature = "";
   let suppressed = 0;
 
   return function logPollingError(error) {
     const current = now();
+    const message = String(error?.message || "");
+    const status = message.match(/\b(401|409)\b/)?.[1] || "";
+    const signature = `${error?.code || ""}|${status}`;
+    const repeat = signature === lastSignature;
 
-    if (current - lastLoggedAt < POLLING_ERROR_LOG_INTERVAL_MS) {
+    // Only a repeat of the same failure is summarised; a different one (say, 409 after network errors) is logged at once.
+    if (repeat && current - lastLoggedAt < POLLING_ERROR_LOG_INTERVAL_MS) {
       suppressed += 1;
       return;
     }
 
-    const message = String(error?.message || "");
     let hint = "";
 
-    if (/\b409\b/.test(message)) {
+    if (status === "409") {
       hint = " Подсказка: этим токеном уже работает другой экземпляр бота (409 Conflict) - остановите лишний.";
-    } else if (/\b401\b/.test(message)) {
+    } else if (status === "401") {
       hint = " Подсказка: Telegram отклонил BOT_TOKEN (401) - проверьте токен у @BotFather.";
     }
 
-    logger.error(`Telegram polling error${suppressed ? ` (и ещё ${suppressed} таких же с прошлой записи)` : ""}:${hint}`, error);
+    let skipped = "";
+
+    if (suppressed) {
+      skipped = repeat
+        ? ` (и ещё ${suppressed} таких же с прошлой записи)`
+        : ` (до этого пропущено ${suppressed} повторов предыдущей ошибки)`;
+    }
+
+    logger.error(`Telegram polling error${skipped}:${hint}`, error);
     lastLoggedAt = current;
+    lastSignature = signature;
     suppressed = 0;
   };
 }

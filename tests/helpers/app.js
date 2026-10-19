@@ -8,6 +8,7 @@ const { FakeTelegram } = require("./fakeTelegram");
 const { FakeOpenRouter, TEST_OPENROUTER_KEY } = require("./fakeOpenRouter");
 
 const ROOT = process.env.APP_ROOT || path.join(__dirname, "..", "..");
+const MAX_LAUNCH_ATTEMPTS = 4;
 const LEGACY_SHIM = path.join(__dirname, "..", "..", "audit-reports", "evidence", "harness", "redirect-shim.js");
 
 function freePort() {
@@ -112,6 +113,10 @@ async function launchApp({ tg, or, env = {}, entry = "index.js", legacy = proces
 async function waitReady(tg, app, timeoutMs = 10000) {
   await tg.waitFor(() => tg.pollCount() > 0 || app.exited(), timeoutMs, "bot polling");
 
+  // The web server reports its fate (started / could not start) a moment after polling begins; wait for it, so that
+  // a port lost to a parallel test is noticed here and not as a mysterious failure in the middle of the test body.
+  await app.waitForOutput(/Web server (started|could not start)/, 5000);
+
   if (app.exited()) {
     throw new Error(`app exited early: ${JSON.stringify(app.exited())}\n${app.output()}`);
   }
@@ -125,13 +130,32 @@ async function withApp(options, fn) {
   // Lets a test arrange the fakes (for example a failing getMe) before the bot process starts.
   options.setup?.({ tg, or });
 
-  const app = await launchApp({ tg, or, env: options.env, legacy: options.legacy });
+  let app = null;
 
   try {
-    await waitReady(tg, app);
+    // freePort() frees the port before the bot binds it, and tests run in parallel processes: now and then another
+    // process grabs that very port in between. That is a property of the harness, not of the bot, so start again.
+    for (let attempt = 1; ; attempt += 1) {
+      app = await launchApp({ tg, or, env: options.env, legacy: options.legacy });
+
+      try {
+        await waitReady(tg, app);
+        break;
+      } catch (error) {
+        const portTaken = /EADDRINUSE/.test(app.output());
+
+        await app.stop().catch(() => {});
+
+        if (!portTaken || attempt >= MAX_LAUNCH_ATTEMPTS) {
+          app = null;
+          throw error;
+        }
+      }
+    }
+
     return await fn({ tg, or, app });
   } finally {
-    await app.stop().catch(() => {});
+    await app?.stop().catch(() => {});
     await tg.stop().catch(() => {});
     await or.stop().catch(() => {});
   }
