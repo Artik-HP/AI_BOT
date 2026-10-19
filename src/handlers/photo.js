@@ -1,14 +1,20 @@
 const path = require("path");
 const CONFIG = require("../config");
+const logger = require("../utils/logger");
+const { safeHandler, trySendMessage } = require("../utils/safe");
 const { askAIWithImage } = require("../services/openrouter");
 const {
   claimIncomingMessage,
   enqueueChatTask,
   downloadTelegramFile,
+  getBotToBotReplyOptions,
+  isFileTooLargeError,
   sendAIResponse
 } = require("../services/telegram");
+const { admitMessage, showTyping } = require("./guard");
 
-const IMAGE_ERROR_MESSAGE = "Не смог прочитать изображение. Проверь размер файла или OPENROUTER_VISION_MODEL.";
+const IMAGE_ERROR_MESSAGE = "Не получилось прочитать изображение. Попробуй другое или поменьше размером.";
+const UNSUPPORTED_IMAGE_MESSAGE = "Этот формат изображения не поддерживается. Отправь JPEG, PNG, WebP или GIF.";
 
 const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   "image/gif",
@@ -16,6 +22,10 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   "image/png",
   "image/webp"
 ]);
+
+function buildImageTooLargeMessage() {
+  return `Изображение слишком большое. Лимит: ${Math.round(CONFIG.MAX_IMAGE_BYTES / 1024 / 1024)} МБ.`;
+}
 
 function getImageMessage(msg) {
   if (Array.isArray(msg.photo) && msg.photo.length > 0) {
@@ -25,6 +35,7 @@ function getImageMessage(msg) {
 
     return {
       fileId: photo.file_id,
+      fileSize: photo.file_size,
       mimeType: "image/jpeg",
       source: "photo"
     };
@@ -36,6 +47,7 @@ function getImageMessage(msg) {
     if (mimeType) {
       return {
         fileId: msg.document.file_id,
+        fileSize: msg.document.file_size,
         mimeType,
         source: "document"
       };
@@ -43,6 +55,15 @@ function getImageMessage(msg) {
   }
 
   return null;
+}
+
+// An image sent as a file in a format the model cannot read (HEIC, BMP, TIFF, SVG...).
+function isUnsupportedImageDocument(msg) {
+  return Boolean(
+    msg.document?.file_id &&
+    String(msg.document.mime_type || "").toLowerCase().startsWith("image/") &&
+    !getSupportedMimeType(msg.document)
+  );
 }
 
 function getPhotoScore(photo) {
@@ -86,7 +107,7 @@ function buildImageDataUrl(imageBuffer, mimeType) {
 }
 
 async function handleImageMessage(bot, chatId, msg, image) {
-  await bot.sendChatAction(chatId, "typing");
+  await showTyping(bot, chatId);
 
   const imageBuffer = await downloadTelegramFile(image.fileId, {
     maxBytes: CONFIG.MAX_IMAGE_BYTES,
@@ -99,15 +120,16 @@ async function handleImageMessage(bot, chatId, msg, image) {
     mimeType: image.mimeType
   }, msg.from);
 
-  await sendAIResponse(chatId, aiReply);
+  await sendAIResponse(chatId, aiReply, { sourceMessageId: msg.message_id, ...getBotToBotReplyOptions(msg) });
 }
 
 function registerPhotoHandler(bot) {
-  bot.on("message", async (msg) => {
+  bot.on("message", safeHandler("Photo message handler", async (msg) => {
     const chatId = msg.chat.id;
     const image = getImageMessage(msg);
+    const unsupported = !image && isUnsupportedImageDocument(msg);
 
-    if (!image) {
+    if (!image && !unsupported) {
       return;
     }
 
@@ -115,18 +137,29 @@ function registerPhotoHandler(bot) {
       return;
     }
 
+    if (!await admitMessage(bot, msg)) {
+      return;
+    }
+
+    if (unsupported) {
+      await trySendMessage(bot, chatId, UNSUPPORTED_IMAGE_MESSAGE);
+      return;
+    }
+
+    if (image.fileSize && image.fileSize > CONFIG.MAX_IMAGE_BYTES) {
+      await trySendMessage(bot, chatId, buildImageTooLargeMessage());
+      return;
+    }
+
     await enqueueChatTask(chatId, async () => {
       try {
         await handleImageMessage(bot, chatId, msg, image);
       } catch (error) {
-        const status = error.response?.status;
-        const details = error.response?.data || error.message;
-
-        console.error("Image recognition error:", status, details);
-        await bot.sendMessage(chatId, IMAGE_ERROR_MESSAGE);
+        logger.error("Image recognition error:", error);
+        await trySendMessage(bot, chatId, isFileTooLargeError(error) ? buildImageTooLargeMessage() : IMAGE_ERROR_MESSAGE);
       }
     });
-  });
+  }));
 }
 
 module.exports = {

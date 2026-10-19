@@ -1,80 +1,57 @@
 const axios = require("axios");
 const TelegramBot = require("node-telegram-bot-api");
 const CONFIG = require("../config");
-const { getErrorDetails } = require("../utils/errors");
-const {
-  dedupeRepeatedReply,
-  normalizeForCompare
-} = require("./memory");
+const logger = require("../utils/logger");
+const { ApiError, toSafeError } = require("../utils/errors");
+const { createKeyedQueue } = require("../utils/queue");
+const { createTtlSet } = require("../utils/ttlSet");
+const { TELEGRAM_MESSAGE_LIMIT, cutSafely, splitMessage } = require("../utils/text");
+const { dedupeRepeatedReply } = require("./memory");
 
-const {
-  PROCESSED_MESSAGE_TTL_MS,
-  DUPLICATE_REPLY_TTL_MS
-} = CONFIG;
-
-const processedMessages = new Set();
-const lastAiReplies = new Map();
-const chatQueues = new Map();
+const processedMessages = createTtlSet(CONFIG.PROCESSED_MESSAGE_TTL_MS);
+const repliedMessages = createTtlSet(CONFIG.DUPLICATE_REPLY_TTL_MS);
 const botConversationWindows = new Map();
+const enqueueChatTask = createKeyedQueue();
+const TRUNCATION_NOTICE = "\n\n[ответ слишком длинный, остаток отброшен]";
+const FILE_TOO_LARGE = "FILE_TOO_LARGE";
+const IDENTITY_MAX_ATTEMPTS = 8;
+const IDENTITY_RETRY_BASE_MS = 1000;
+const IDENTITY_RETRY_MAX_MS = 60000;
 let bot;
 let botIdentity;
 
-const TELEGRAM_MESSAGE_LIMIT = 4096;
-
 function createTelegramBot() {
-  bot = new TelegramBot(CONFIG.BOT_TOKEN, { polling: true });
-  attachOutgoingMessageLogger(bot);
+  bot = new TelegramBot(CONFIG.BOT_TOKEN, {
+    polling: true,
+    baseApiUrl: CONFIG.TELEGRAM_API_BASE_URL
+  });
 
-  if (typeof bot.getMe === "function") {
-    bot.getMe()
-      .then((identity) => {
-        botIdentity = {
-          id: String(identity.id),
-          username: normalizeTelegramUsername(identity.username)
-        };
-      })
-      .catch((error) => {
-        console.error("Telegram getMe error:", getErrorDetails(error));
-      });
-  }
+  loadBotIdentity(bot);
 
   return bot;
 }
 
-function formatOutgoingText(text) {
-  if (typeof text === "string") {
-    return text;
-  }
+// Without its own identity the bot cannot tell which "/cmd@name" or @mention is meant for it,
+// so a failed getMe() (network blip at start) is retried with a growing pause instead of being forgotten.
+function loadBotIdentity(currentBot, attempt = 1) {
+  currentBot.getMe()
+    .then((identity) => {
+      botIdentity = {
+        id: String(identity.id),
+        username: normalizeTelegramUsername(identity.username)
+      };
+    })
+    .catch((error) => {
+      logger.error(`Telegram getMe error (попытка ${attempt} из ${IDENTITY_MAX_ATTEMPTS}):`, error);
 
-  try {
-    return JSON.stringify(text);
-  } catch (error) {
-    return String(text);
-  }
-}
+      if (attempt >= IDENTITY_MAX_ATTEMPTS || currentBot !== bot) {
+        return;
+      }
 
-function logOutgoingMessage(chatId, text) {
-  console.log("================================");
-  console.log("Ответ бота");
-  console.log("Chat ID:", chatId);
-  console.log("Текст:", formatOutgoingText(text));
-  console.log("================================");
-}
+      const delay = Math.min(IDENTITY_RETRY_BASE_MS * 2 ** (attempt - 1), IDENTITY_RETRY_MAX_MS);
 
-function attachOutgoingMessageLogger(telegramBot) {
-  if (telegramBot.__outgoingMessageLoggerAttached) {
-    return;
-  }
-
-  const originalSendMessage = telegramBot.sendMessage.bind(telegramBot);
-
-  telegramBot.sendMessage = async (...args) => {
-    const result = await originalSendMessage(...args);
-    logOutgoingMessage(args[0], args[1]);
-    return result;
-  };
-
-  telegramBot.__outgoingMessageLoggerAttached = true;
+      setTimeout(() => loadBotIdentity(currentBot, attempt + 1), delay).unref();
+    });
 }
 
 function getTelegramBot() {
@@ -85,25 +62,33 @@ function getTelegramBot() {
   return bot;
 }
 
+function getBotUsername() {
+  return botIdentity?.username || null;
+}
+
 function claimIncomingMessage(msg) {
   if (!msg?.chat?.id || !msg?.message_id) {
     return true;
   }
 
-  const key = `${msg.chat.id}:${msg.message_id}`;
-
-  if (processedMessages.has(key)) {
-    return false;
-  }
-
-  processedMessages.add(key);
-  setTimeout(() => processedMessages.delete(key), PROCESSED_MESSAGE_TTL_MS).unref?.();
-  return true;
+  return processedMessages.claim(`${msg.chat.id}:${msg.message_id}`);
 }
 
 function normalizeTelegramUsername(username) {
   const cleanUsername = String(username || "").trim().replace(/^@/, "").toLowerCase();
   return /^[a-z0-9_]{5,32}$/.test(cleanUsername) ? cleanUsername : null;
+}
+
+// "/help@some_other_bot" is a command for another bot sharing the group, not for this one.
+// Until getMe() has answered the bot cannot tell, and accepts the command.
+function isAddressedToThisBot(text) {
+  const match = String(text || "").match(/^\/\w+@(\w+)/);
+
+  if (!match || !botIdentity?.username) {
+    return true;
+  }
+
+  return normalizeTelegramUsername(match[1]) === botIdentity.username;
 }
 
 function isAllowedBotIdentity(identity = {}) {
@@ -167,9 +152,19 @@ function isBotMessageDirectedAtThisBot(msg) {
     return false;
   }
 
-  return new RegExp(`(^|\\W)@${botIdentity.username}(?=$|\\W)`, "i").test(String(msg.text || ""));
+  return new RegExp(`(^|\\W)@${botIdentity.username}(?=$|\\W)`, "i").test(String(msg.text || msg.caption || ""));
 }
 
+function pruneBotConversationWindows(now) {
+  for (const [key, window] of botConversationWindows) {
+    if (now - window.startedAt >= CONFIG.BOT_TO_BOT_WINDOW_MS) {
+      botConversationWindows.delete(key);
+    }
+  }
+}
+
+// Gate for every message that comes from another bot (text, voice, photo alike).
+// Returns true when the message may be processed.
 function claimIncomingBotMessage(msg) {
   if (!msg.from?.is_bot) {
     return true;
@@ -192,18 +187,17 @@ function claimIncomingBotMessage(msg) {
   const key = `${msg.chat?.id || "unknown"}:${msg.from.id || msg.from.username || "bot"}`;
   let window = botConversationWindows.get(key);
 
+  if (botConversationWindows.size > 200) {
+    pruneBotConversationWindows(now);
+  }
+
   if (!window || now - window.startedAt >= CONFIG.BOT_TO_BOT_WINDOW_MS) {
     window = { count: 0, startedAt: now };
     botConversationWindows.set(key, window);
-    setTimeout(() => {
-      if (botConversationWindows.get(key) === window) {
-        botConversationWindows.delete(key);
-      }
-    }, CONFIG.BOT_TO_BOT_WINDOW_MS).unref?.();
   }
 
   if (window.count >= CONFIG.BOT_TO_BOT_MAX_TURNS) {
-    console.warn(`Bot-to-bot turn limit reached for ${key}`);
+    logger.warn(`Bot-to-bot turn limit reached for ${key}`);
     return false;
   }
 
@@ -211,7 +205,7 @@ function claimIncomingBotMessage(msg) {
     window.lastAcceptedAt &&
     now - window.lastAcceptedAt < CONFIG.BOT_TO_BOT_MIN_INTERVAL_MS
   ) {
-    console.warn(`Bot-to-bot rate limit reached for ${key}`);
+    logger.warn(`Bot-to-bot rate limit reached for ${key}`);
     return false;
   }
 
@@ -235,6 +229,35 @@ function getBotToBotStatus() {
   };
 }
 
+function prefixBotMention(text, username) {
+  const cleanUsername = normalizeTelegramUsername(username);
+
+  if (!cleanUsername) {
+    return text;
+  }
+
+  const mentionPattern = new RegExp(`(^|\\s)@${cleanUsername}(?=$|\\s|[,.!?;:])`, "i");
+
+  if (mentionPattern.test(text)) {
+    return text;
+  }
+
+  return `@${cleanUsername} ${text}`;
+}
+
+// Never sends more than MAX_REPLY_PARTS messages for one reply; the rest is dropped with a visible notice.
+function limitReplyParts(parts) {
+  if (parts.length <= CONFIG.MAX_REPLY_PARTS) {
+    return parts;
+  }
+
+  const kept = parts.slice(0, CONFIG.MAX_REPLY_PARTS);
+  const last = kept.length - 1;
+
+  kept[last] = `${cutSafely(kept[last], TELEGRAM_MESSAGE_LIMIT - TRUNCATION_NOTICE.length).trimEnd()}${TRUNCATION_NOTICE}`;
+  return kept;
+}
+
 async function sendMessageToBot(username, text) {
   if (!CONFIG.BOT_TO_BOT_ENABLED) {
     throw new Error("Bot-to-bot communication is disabled");
@@ -256,47 +279,15 @@ async function sendMessageToBot(username, text) {
     throw new Error(`@${cleanUsername} is not in BOT_TO_BOT_ALLOW_BOTS`);
   }
 
-  if (chatId) {
-    return getTelegramBot().sendMessage(
-      chatId,
-      prefixBotMention(cleanText, cleanUsername).slice(0, TELEGRAM_MESSAGE_LIMIT)
-    );
+  const target = chatId || `@${cleanUsername}`;
+  const outgoing = chatId ? prefixBotMention(cleanText, cleanUsername) : cleanText;
+  let lastMessage = null;
+
+  for (const part of limitReplyParts(splitMessage(outgoing))) {
+    lastMessage = await getTelegramBot().sendMessage(target, part);
   }
 
-  return getTelegramBot().sendMessage(`@${cleanUsername}`, cleanText.slice(0, TELEGRAM_MESSAGE_LIMIT));
-}
-
-function shouldSkipDuplicateReply(chatId, reply) {
-  const now = Date.now();
-  const normalized = normalizeForCompare(reply);
-  const previous = lastAiReplies.get(String(chatId));
-
-  lastAiReplies.set(String(chatId), {
-    normalized,
-    time: now
-  });
-
-  return Boolean(
-    previous &&
-    previous.normalized === normalized &&
-    now - previous.time < DUPLICATE_REPLY_TTL_MS
-  );
-}
-
-function prefixBotMention(text, username) {
-  const cleanUsername = normalizeTelegramUsername(username);
-
-  if (!cleanUsername) {
-    return text;
-  }
-
-  const mentionPattern = new RegExp(`(^|\\s)@${cleanUsername}(?=$|\\s|[,.!?;:])`, "i");
-
-  if (mentionPattern.test(text)) {
-    return text;
-  }
-
-  return `@${cleanUsername} ${text}`;
+  return lastMessage;
 }
 
 function buildSendMessageOptions(options = {}) {
@@ -324,37 +315,29 @@ function getBotToBotReplyOptions(msg) {
 async function sendAIMessage(chatId, reply, options = {}) {
   const cleanReply = dedupeRepeatedReply(reply);
 
-  if (!cleanReply || shouldSkipDuplicateReply(chatId, cleanReply)) {
+  if (!cleanReply) {
     return;
   }
 
+  // The same incoming message must never be answered twice; different messages may well get equal answers.
+  if (options.sourceMessageId && !repliedMessages.claim(`${chatId}:${options.sourceMessageId}`)) {
+    return;
+  }
+
+  logger.message("out", { chatId }, cleanReply);
   await sendCleanTextMessage(chatId, cleanReply, options);
 }
 
 async function sendCleanTextMessage(chatId, cleanReply, options = {}) {
-  const text = prefixBotMention(cleanReply, options.targetUsername).slice(0, TELEGRAM_MESSAGE_LIMIT);
-  await bot.sendMessage(chatId, text, buildSendMessageOptions(options));
+  const parts = limitReplyParts(splitMessage(prefixBotMention(cleanReply, options.targetUsername)));
+
+  for (const [index, part] of parts.entries()) {
+    await getTelegramBot().sendMessage(chatId, part, index === 0 ? buildSendMessageOptions(options) : {});
+  }
 }
 
 async function sendAIResponse(chatId, reply, options = {}) {
   await sendAIMessage(chatId, reply, options);
-}
-
-
-function enqueueChatTask(chatId, task) {
-  const key = String(chatId);
-  const previous = chatQueues.get(key) || Promise.resolve();
-  const next = previous
-    .catch(() => {})
-    .then(task)
-    .finally(() => {
-      if (chatQueues.get(key) === next) {
-        chatQueues.delete(key);
-      }
-    });
-
-  chatQueues.set(key, next);
-  return next;
 }
 
 function getDownloadOptions(options) {
@@ -371,28 +354,63 @@ function getDownloadOptions(options) {
   };
 }
 
+// True when the file exceeds our limit or Telegram refuses to hand it to a bot.
+function isFileTooLargeError(error) {
+  return error?.code === FILE_TOO_LARGE || /file is too big/i.test(String(error?.message || ""));
+}
+
+// The download URL contains the bot token, so errors are converted before they leave this function.
 async function downloadTelegramFile(fileId, options) {
   const { maxBytes, fileLabel } = getDownloadOptions(options);
-  const fileLink = await bot.getFileLink(fileId);
-  const response = await axios.get(fileLink, {
-    responseType: "arraybuffer",
-    timeout: 60000,
-    maxContentLength: maxBytes,
-    maxBodyLength: maxBytes
-  });
 
-  const fileBuffer = Buffer.from(response.data);
+  try {
+    const fileLink = await getTelegramBot().getFileLink(fileId);
+    const response = await axios.get(fileLink, {
+      responseType: "arraybuffer",
+      timeout: 60000,
+      maxContentLength: maxBytes,
+      maxBodyLength: maxBytes
+    });
+    const fileBuffer = Buffer.from(response.data);
 
-  if (fileBuffer.length > maxBytes) {
-    throw new Error(`${fileLabel} file is too large: ${fileBuffer.length} bytes`);
+    if (fileBuffer.length > maxBytes) {
+      throw new ApiError(`${fileLabel} file is too large: ${fileBuffer.length} bytes`, { code: FILE_TOO_LARGE });
+    }
+
+    return fileBuffer;
+  } catch (error) {
+    if (/maxContentLength|maxBodyLength/.test(String(error?.message))) {
+      throw new ApiError(`${fileLabel} file is too large (limit ${maxBytes} bytes)`, { code: FILE_TOO_LARGE });
+    }
+
+    throw toSafeError(error);
+  }
+}
+
+// node-telegram-bot-api: stopPolling({ cancel: true }) alone returns at once but the loop re-arms itself
+// in a `finally` block and keeps polling; a plain stopPolling() waits for the whole long-poll (up to ~10 s).
+// Raising the library's own abort flag first makes the stop immediate and final.
+async function stopTelegramPolling(bot) {
+  if (bot?._polling) {
+    bot._polling._abort = true;
   }
 
-  return fileBuffer;
+  await bot.stopPolling({ cancel: true, reason: "shutdown" });
+}
+
+// Gives running replies a chance to go out before the process stops.
+async function waitForChatTasks(timeoutMs) {
+  await Promise.race([
+    enqueueChatTask.whenIdle(),
+    new Promise((resolve) => setTimeout(resolve, timeoutMs).unref?.())
+  ]);
 }
 
 module.exports = {
   createTelegramBot,
   getTelegramBot,
+  getBotUsername,
+  isAddressedToThisBot,
   claimIncomingMessage,
   claimIncomingBotMessage,
   getBotToBotReplyOptions,
@@ -401,5 +419,8 @@ module.exports = {
   sendAIMessage,
   sendAIResponse,
   enqueueChatTask,
-  downloadTelegramFile
+  downloadTelegramFile,
+  isFileTooLargeError,
+  stopTelegramPolling,
+  waitForChatTasks
 };

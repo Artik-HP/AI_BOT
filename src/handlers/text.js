@@ -1,13 +1,15 @@
+const logger = require("../utils/logger");
+const { safeHandler, trySendMessage } = require("../utils/safe");
 const { askAI } = require("../services/openrouter");
 const {
   claimIncomingMessage,
-  claimIncomingBotMessage,
   getBotToBotReplyOptions,
   enqueueChatTask,
   sendAIResponse
 } = require("../services/telegram");
+const { admitMessage, showTyping } = require("./guard");
 
-const AI_ERROR_MESSAGE = "AI сейчас не ответил. Проверь OPENROUTER_API_KEY, модель или доступ к серверу.";
+const AI_ERROR_MESSAGE = "Не получилось получить ответ от ИИ. Попробуй ещё раз чуть позже.";
 
 function getAIText(text, isBotMessage) {
   if (!text || !isBotMessage || !text.startsWith("/")) {
@@ -18,17 +20,7 @@ function getAIText(text, isBotMessage) {
 }
 
 function registerTextHandler(bot, commands) {
-bot.on("message", async (msg) => {
-
-    console.log("================================");
-    console.log("📨 Новое сообщение");
-    console.log("ID:", msg.from?.id);
-    console.log("Имя:", msg.from?.first_name);
-    console.log("Username:", msg.from?.username);
-    console.log("Chat ID:", msg.chat?.id);
-    console.log("Текст:", msg.text);
-    console.log("================================");
-
+  bot.on("message", safeHandler("Text message handler", async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text?.trim();
     const isBotMessage = Boolean(msg.from?.is_bot);
@@ -42,9 +34,11 @@ bot.on("message", async (msg) => {
       return;
     }
 
-    if (isBotMessage && !claimIncomingBotMessage(msg)) {
+    if (!await admitMessage(bot, msg)) {
       return;
     }
+
+    logger.message("in", { chatId, userId: msg.from?.id, username: msg.from?.username }, text);
 
     if (!isBotMessage && text && await commands.handleMenuButton(chatId, text)) {
       return;
@@ -52,18 +46,18 @@ bot.on("message", async (msg) => {
 
     await enqueueChatTask(chatId, async () => {
       try {
-        await bot.sendChatAction(chatId, "typing");
+        await showTyping(bot, chatId);
         const aiReply = await askAI(chatId, aiText, msg.from);
-        await sendAIResponse(chatId, aiReply, isBotMessage ? getBotToBotReplyOptions(msg) : {});
+        await sendAIResponse(chatId, aiReply, {
+          sourceMessageId: msg.message_id,
+          ...(isBotMessage ? getBotToBotReplyOptions(msg) : {})
+        });
       } catch (error) {
-        const status = error.response?.status;
-        const details = error.response?.data || error.message;
-
-        console.error("AI error:", status, details);
-        await bot.sendMessage(chatId, AI_ERROR_MESSAGE);
+        logger.error("AI error:", error);
+        await trySendMessage(bot, chatId, AI_ERROR_MESSAGE);
       }
     });
-  });
+  }));
 }
 
 module.exports = {

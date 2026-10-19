@@ -1,25 +1,39 @@
 {
   "name": "ai_bot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Telegram-бот на Node.js: OpenRouter (текст, голос, фото), ассистент аккаунта, bot-to-bot и userbot",
   "main": "index.js",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node index.js",
-    "telegram:session": "node scripts/create-telegram-session.js",
     "userbot": "node scripts/userbot.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "telegram:session": "node scripts/create-telegram-session.js",
+    "test": "node --test",
+    "lint": "eslint .",
+    "check": "npm run lint && npm test"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@neondatabase/serverless": "^1.1.0",
-    "@vercel/speed-insights": "^2.0.0",
-    "axios": "^1.16.0",
+    "axios": "^1.20.0",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1",
+    "express": "^5.3.0",
     "node-telegram-bot-api": "^0.67.0",
     "telegram": "^2.26.22"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^16.5.0"
+  },
+  "overrides": {
+    "request": "npm:@cypress/request@^3.0.10",
+    "qs": "^6.16.1",
+    "uuid": "^11.1.1"
   }
 }
