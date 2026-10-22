@@ -1,0 +1,274 @@
+{
+  "version": 1,
+  "createdAt": "2026-10-19T01:35:55.124Z",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "a344e1fc8a9cdbe5e12a2ee367eb48c8eb2c11fcbe4e52f400f3ff0e30473fdc"
+    },
+    {
+      "path": "deploy/ubuntu/Caddyfile.example",
+      "sha256": "1931f7bae1fefd9bf59bdde742b41d6f093f7cc6719b0b4e59dc9b9b2115d1c9"
+    },
+    {
+      "path": "deploy/ubuntu/README.md",
+      "sha256": "1ca1d21fd114d2f2001b96d34c0a4c1a569b6f715b0358bb9e230dec1e20fa1c"
+    },
+    {
+      "path": "deploy/ubuntu/ai-bot.service.example",
+      "sha256": "f15c73f798b6c49406e10721ec68d3abbac5b02a4fe09a85e35ae5b544426258"
+    },
+    {
+      "path": "deploy/ubuntu/bot.env.example",
+      "sha256": "e98d2fcbe5529a33097278b6ac231f94f12c475b69a50ebcd085345c47ecd633"
+    },
+    {
+      "path": "deploy/ubuntu/install.sh",
+      "sha256": "8caaf7defdcb01f4fc07997cfa46f8def0053fe5e961a2fd9a2727e9bf6e103d"
+    },
+    {
+      "path": "index.js",
+      "sha256": "fd2aa79134597710be571cce6e63765759b0f713d2ad09e948b37bc34ad8b190"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "737156613afef109105603555772d9bebf50ba65121f290f6b416076cfb40280"
+    },
+    {
+      "path": "package.json",
+      "sha256": "7ede5d3c01d805c6db36b617523b4832bcb4064907fc391da4fcae4eae524ed6"
+    },
+    {
+      "path": "public/app.js",
+      "sha256": "c7a43cd0e7e94b301096ca235b6d56666c1c10fbfa554a1db28b5efbcf3e35dd"
+    },
+    {
+      "path": "public/i18n.js",
+      "sha256": "4244fd356407420fe97f542a44f299f96f19999302463e12590886608e410705"
+    },
+    {
+      "path": "public/index.html",
+      "sha256": "afff1272a8f36371cb7f9c21ed3427b441dab3dbe283e175ef555c7431f62b48"
+    },
+    {
+      "path": "public/locales.json",
+      "sha256": "92edc4052d18a5e9607fdedbab2814b1a7e7b59c59bb0859d60c77dfb0221b0c"
+    },
+    {
+      "path": "public/product.js",
+      "sha256": "0b7fec1797e4d925d8190d5b8ed4bf5aea414b7db71900bbca369ec1be8dd617"
+    },
+    {
+      "path": "public/style.css",
+      "sha256": "3b3a71230ff3d30bc2a494e0c6c996c2d3b570b1a85dc7b2c5456e56447663a0"
+    },
+    {
+      "path": "response.js",
+      "sha256": "fd6fac32055331a66b9dbb0901bc59c88791e2b99770147334f5122c51bffd6f"
+    },
+    {
+      "path": "scripts/check-commands-live.js",
+      "sha256": "36aebf48b17127516983003d45cc6856970a1eab06cfb98d5c312bcf64479080"
+    },
+    {
+      "path": "scripts/check-interactive-live.js",
+      "sha256": "7f87e504ccee23f4085b80f3d59961170d96cd3cd5c2c01852250e67686c3e11"
+    },
+    {
+      "path": "scripts/check-interactive-telegram.js",
+      "sha256": "63f01c6ee39b9c1ab5ee71196f22e922aa8fd181527b0fe2fcf587596706a1a7"
+    },
+    {
+      "path": "scripts/check-syntax.js",
+      "sha256": "4444d6daf9f796e40ecc44b69dca5576fdd3b49c40ae872c1c74dd0cf5677c74"
+    },
+    {
+      "path": "scripts/check-vps.js",
+      "sha256": "539b72f30770483db3c21147f060d7447fe3426c34648351a0134afe47ccc1c7"
+    },
+    {
+      "path": "scripts/create-telegram-session.js",
+      "sha256": "c7c3974d4106d8df004359fa42281cef0bcb47a9f205cd424ef89dbe425bc495"
+    },
+    {
+      "path": "scripts/doctor.js",
+      "sha256": "3df3bf3500fd68c5bd441ae66d0fdd5e817f2ed03ab0463315373fb04ec3f6c9"
+    },
+    {
+      "path": "scripts/export-command-catalog.js",
+      "sha256": "42f3633a43fceba01b8721c359e59039c481ec511d3dab3d0f764c288be11ae8"
+    },
+    {
+      "path": "scripts/generate-locales.js",
+      "sha256": "7556d1165d5432165aec9aa1e715d18b4b57a3cc43c8735905d06aca372e75be"
+    },
+    {
+      "path": "scripts/open-web.js",
+      "sha256": "2177317b38ae1eff895702310f0fb7db1f241d50a91eb91830e14881f7f34d85"
+    },
+    {
+      "path": "scripts/package-vps.js",
+      "sha256": "83d9e58f8b3a76dd4bfd351998bc63004bcacb5626cd11594495f199f56eede1"
+    },
+    {
+      "path": "scripts/preview-commands.js",
+      "sha256": "453613c822654a9f09e97c01861cfbd8a34fe40c69806f5591165e62d582c9cc"
+    },
+    {
+      "path": "scripts/setup.js",
+      "sha256": "2aa3ec36818d12b2b8fd11995034e35746e484b0653430d8d1c33d3063538461"
+    },
+    {
+      "path": "scripts/userbot.js",
+      "sha256": "efb85d5697a18f07a7ac573daf8b5d388935fd4f08a7d28ff96b6e5f070fb79f"
+    },
+    {
+      "path": "src/bot.js",
+      "sha256": "b73d4e530ffea3fd37df68856e433eb80cbe66383ebec9fffaf70ad9f162a906"
+    },
+    {
+      "path": "src/commandSystem/aliases.js",
+      "sha256": "46c9632ceab9c2427be31780c57f2375cb23eee70f6bf661a706dfe04cf17df4"
+    },
+    {
+      "path": "src/commandSystem/engine.js",
+      "sha256": "929deea8135808e30363bbe5c88f3feb1df67f708d7924ab6af7815cd46e996f"
+    },
+    {
+      "path": "src/commandSystem/games.js",
+      "sha256": "faca523dfb08c923f1521f8f094a1628392ad29189d25023836592f2ea705c1c"
+    },
+    {
+      "path": "src/commandSystem/productCommands.js",
+      "sha256": "2f0132c0ab7efa703a5adc3c090b99e98beb04a0dca9055ddc6b2e7790c9558a"
+    },
+    {
+      "path": "src/commandSystem/registry.js",
+      "sha256": "9dee7e18d0605e62675f9de6e41e5fe8075a1cdad32240de8f8de7a015df955f"
+    },
+    {
+      "path": "src/commandSystem/store.js",
+      "sha256": "81dedde7cda829be0e8b0fa468054e310f7ecff2d049824e507863ee5cc5475b"
+    },
+    {
+      "path": "src/commandSystem/telegram.js",
+      "sha256": "5e87e74c2df02e55d5fd6221fac4e0e40d4055fafd63dc7bfa59ebfb1abf6d72"
+    },
+    {
+      "path": "src/commandSystem/tools.js",
+      "sha256": "9120076e9f164572e1191863896e8417d5cd666ab6daf7af0f141b33fbf6ac29"
+    },
+    {
+      "path": "src/commandSystem/userbot.js",
+      "sha256": "d0aeb5a250023e76e44f61c47c908fba98406f2a36b07814594ca0a8dc668aab"
+    },
+    {
+      "path": "src/commands.js",
+      "sha256": "f780ac606aa2a1bd27374f505770a27ce8dbc923eb5d6c9545e852479ea5014d"
+    },
+    {
+      "path": "src/config.js",
+      "sha256": "67dae84f972ba967e626e98ba7b7228cb47ac51952a5b227acc0409b9f6919cf"
+    },
+    {
+      "path": "src/handlers/document.js",
+      "sha256": "8c33fb54d36b6fb2317a4edfac90ec1a5fc16bc7349ff7ee0b4ac099d21db878"
+    },
+    {
+      "path": "src/handlers/photo.js",
+      "sha256": "f1d7a867068a2e6bd8d5eb9cefe0cbcc5859e53fab6790e27d5dc16bc3710471"
+    },
+    {
+      "path": "src/handlers/text.js",
+      "sha256": "cd9b136855818995087c7aa5f113aca2213bd1648d170b1a3b1c5898839cc855"
+    },
+    {
+      "path": "src/handlers/voice.js",
+      "sha256": "13e12c079c5b4c0c2c0c301264e39b1fe258889178f4f80361c4c59bd4248895"
+    },
+    {
+      "path": "src/runtime.js",
+      "sha256": "5c11e23b7503cf30362f3227778c60f16a92984b2ec96e7aa3417a4a6d737e3c"
+    },
+    {
+      "path": "src/serverLifecycle.js",
+      "sha256": "dd7146b355cb527a9ab4724c463c4c46c169b3b27dac1922291597d341cd5a87"
+    },
+    {
+      "path": "src/services/access.js",
+      "sha256": "c0b68a2f077fbcc10eee771ed4a79579d070273bd3755a947a55093888fc100a"
+    },
+    {
+      "path": "src/services/accountAssistant.js",
+      "sha256": "5e228437805ddc5adbb628463ef460702f73ef66cac4e53e0eadec521b26d8fb"
+    },
+    {
+      "path": "src/services/aiProviders.js",
+      "sha256": "520a480332306cfe02e6ee34b5f6a092edef8aa58bc3f1f58f791d4c95f74542"
+    },
+    {
+      "path": "src/services/conversation.js",
+      "sha256": "ba201bfdfebb7f3730609e13dd0be9d4561c02b4aca45bda82d295b863d5f4a9"
+    },
+    {
+      "path": "src/services/diagnostics.js",
+      "sha256": "bd246f14b0dbfc5d180ee5ef3134d4578fcb49da446f4e8696a9f6da8159f56d"
+    },
+    {
+      "path": "src/services/envSettings.js",
+      "sha256": "3fe2b11970bbc7d51bf8df57ccdf06578e4d3ac4a0d1422afd57295eead1ecac"
+    },
+    {
+      "path": "src/services/i18n.js",
+      "sha256": "75a6a7eab2d389b928e1947d8e03b81580fbfe632f3d0de1f18c57144487b350"
+    },
+    {
+      "path": "src/services/interactiveQuestion.js",
+      "sha256": "b6e7e491d0a8836544739c6f54ed6881bbf29f019fd09d19d32184be4a5fe280"
+    },
+    {
+      "path": "src/services/interactiveState.js",
+      "sha256": "2f0eccaf2d1a761380a964ddca96763af3bc9dc2e853a02778c2a8433ca7abbe"
+    },
+    {
+      "path": "src/services/memory.js",
+      "sha256": "2e8d11cb9b6d38f94313e5ea89b98b7fa06fc3781d927bea74a92bf52661d9a8"
+    },
+    {
+      "path": "src/services/openrouter.js",
+      "sha256": "c1a7880dc20efb1c71c17f11e2d41d47ebfbf387d17667d6a1c8ba6904443fc7"
+    },
+    {
+      "path": "src/services/openrouterInteractive.js",
+      "sha256": "5e7b9d20ca380a90b833f2c5b7e397ea755ea29b3b4909456906c798c9d38c4b"
+    },
+    {
+      "path": "src/services/personalData.js",
+      "sha256": "ac636c85e831b0ee876e076c9f6006dc1874a6b0871e0dac54eecdebde8de3bf"
+    },
+    {
+      "path": "src/services/preferences.js",
+      "sha256": "9251ff6b5430da7ee467ac361ac5be8e3273a3627c16b5d8723e21667aadb30b"
+    },
+    {
+      "path": "src/services/selfCheck.js",
+      "sha256": "94d53f039687f077b402e69dacc4eddd2fa63d2c5dffe956ba6e4cc42e4c7558"
+    },
+    {
+      "path": "src/services/telegram.js",
+      "sha256": "3a1cf2f85cf1fec78c2ebbb764a12bdec802035742a64f8bd97fdf111d0ffc91"
+    },
+    {
+      "path": "src/utils/errors.js",
+      "sha256": "676580b62b47d8d59482f365c51a7501e6e30d1f4dc6859fb923c65b805dd6bc"
+    },
+    {
+      "path": "src/utils/logger.js",
+      "sha256": "7a465c498446cec5aff1cb410f6372837c63fc7228ab8fe7e990975dc9c7b05e"
+    },
+    {
+      "path": "src/web.js",
+      "sha256": "65b9ca872961ce3f93ed466faadee241ef58a6ce34ad2fe998d3a7c1d7f4f032"
+    }
+  ]
+}

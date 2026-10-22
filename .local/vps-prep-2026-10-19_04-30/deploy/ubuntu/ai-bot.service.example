@@ -1,0 +1,21 @@
+[Unit]
+Description=AI Telegram bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ai-bot
+Group=ai-bot
+WorkingDirectory=/opt/ai-bot
+ExecStart=/usr/bin/node /opt/ai-bot/index.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ai-bot
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,57 @@
+ M .env.example
+ M .gitignore
+ M AGENTS.md
+ M README.md
+ M memory.json.bak
+ M package-lock.json
+ M package.json
+ M scripts/userbot.js
+ M src/bot.js
+ M src/commands.js
+ M src/config.js
+ M src/handlers/photo.js
+ M src/handlers/text.js
+ M src/handlers/voice.js
+ M src/services/accountAssistant.js
+ M src/services/memory.js
+ M src/services/openrouter.js
+ M src/services/telegram.js
+ M src/utils/errors.js
+ M src/utils/logger.js
+?? audit-reports/
+?? deploy/
+?? docs/
+?? eslint.config.cjs
+?? launch-web.cmd
+?? playwright.config.js
+?? public/
+?? scripts/check-commands-live.js
+?? scripts/check-interactive-live.js
+?? scripts/check-interactive-telegram.js
+?? scripts/check-syntax.js
+?? scripts/check-vps.js
+?? scripts/doctor.js
+?? scripts/export-command-catalog.js
+?? scripts/generate-locales.js
+?? scripts/open-web.js
+?? scripts/package-vps.js
+?? scripts/preview-commands.js
+?? scripts/setup.js
+?? src/commandSystem/
+?? src/handlers/document.js
+?? src/runtime.js
+?? src/serverLifecycle.js
+?? src/services/access.js
+?? src/services/aiProviders.js
+?? src/services/conversation.js
+?? src/services/diagnostics.js
+?? src/services/envSettings.js
+?? src/services/i18n.js
+?? src/services/interactiveQuestion.js
+?? src/services/interactiveState.js
+?? src/services/openrouterInteractive.js
+?? src/services/personalData.js
+?? src/services/preferences.js
+?? src/services/selfCheck.js
+?? src/web.js
+?? tests/

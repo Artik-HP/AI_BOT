@@ -1,0 +1,12 @@
+node_modules
+memory.json
+.env
+interactive-state.json
+interactive-state.json.*.tmp
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+test-results/
+playwright-report/
+ПОЛЕЗНЫЕ КОДЫ, КОМАНДЫ И Т.Д.txt

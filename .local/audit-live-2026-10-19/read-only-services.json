@@ -1,0 +1,24 @@
+{
+  "checkedAt": "2026-10-19T08:05:31.134Z",
+  "results": [
+    {
+      "name": "Open-Meteo: real weather",
+      "status": "PASS",
+      "boundary": "Two real HTTP requests; no personal data or AI generation"
+    },
+    {
+      "name": "Telegram: getMe/getWebhookInfo",
+      "status": "PASS",
+      "identityIsBot": true,
+      "webhookConfigured": false,
+      "pendingUpdates": 0,
+      "webhookHasLastError": false,
+      "boundary": "Read-only; no polling, sends, command registration or webhook changes"
+    },
+    {
+      "name": "OpenRouter: model catalog",
+      "status": "PASS",
+      "boundary": "Real authenticated model catalog; generation verified separately"
+    }
+  ]
+}

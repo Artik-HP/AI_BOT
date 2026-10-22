@@ -1,0 +1,22 @@
+[
+  {
+    "name": ".env",
+    "length": 1613,
+    "sha256": "F7C3B83D2DF2E48DA8A5A9A0004EB3721B6F059AB8E9F6F0CF02F979FE9EF58A"
+  },
+  {
+    "name": "memory.json",
+    "length": 54653,
+    "sha256": "7BD67CBDA25D27A82ED2F7A0DF5B94EA3C5C2D5F00E4517CAF0D304EA270DCC2"
+  },
+  {
+    "name": "memory.json.bak",
+    "length": 54653,
+    "sha256": "7BD67CBDA25D27A82ED2F7A0DF5B94EA3C5C2D5F00E4517CAF0D304EA270DCC2"
+  },
+  {
+    "name": "userbot.session",
+    "length": 395,
+    "sha256": "C304B0DD09A01CD5D3323D108419315F857D0D8B3229E44F962C905009F20FAE"
+  }
+]

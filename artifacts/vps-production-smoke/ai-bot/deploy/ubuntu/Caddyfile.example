@@ -1,0 +1,17 @@
+# Install as a separate /etc/caddy/conf.d/ai-bot.caddy file.
+# Add `import /etc/caddy/conf.d/*.caddy` to the existing main Caddyfile.
+# Replace this domain; leave existing sites in the main file intact.
+bot.example.com {
+    @bot path /health /telegram-webhook
+    handle @bot {
+        reverse_proxy 127.0.0.1:12722
+    }
+
+    # Default: keep the web panel private (use an SSH tunnel).
+    # To publish it, set WEB_ACCESS_TOKEN, WEB_PUBLIC_URL and
+    # WEB_SECURE_COOKIE=true, then replace `respond` below with:
+    # reverse_proxy 127.0.0.1:12722
+    handle {
+        respond "Not found" 404
+    }
+}

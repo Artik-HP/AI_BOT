@@ -1,0 +1,12 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const {registry,CATEGORIES}=require('../src/commandSystem/registry');
+const original=new Set(['start','menu','help','voice','status','reset','bot_status','bot_send','bot_chat',...['help','status','config','pending','send','drop','reply','redraft','message','mode','private','allow','unallow','block','unblock','enable','disable'].map(n=>'account_'+n),...['help','ping','say','echo','whoami','status','chatid','time'].map(n=>'userbot_'+n)]);
+const list=[...registry.values()].map(({handler,...metadata})=>({...metadata,origin:original.has(metadata.id)?'existing':'new'}));
+const root=path.join(__dirname,'../docs');fs.mkdirSync(root,{recursive:true});
+const aliases=require('../src/commandSystem/aliases').aliases;
+fs.writeFileSync(path.join(root,'command-catalog.json'),JSON.stringify({version:2,categories:CATEGORIES,aliases,commands:list},null,2));
+const escape=value=>String(value||'—').replace(/\|/g,'\\|').replace(/\n/g,' ');
+const rows=list.map(c=>`| ${c.id.startsWith('userbot_')?'.'+c.id.slice(8):'/'+c.id} | ${escape(c.description)} | ${escape(CATEGORIES[c.category])} | ${Object.entries(c.availability).filter(([,enabled])=>enabled).map(([name])=>name).join(', ')}${c.owner?' (владелец)':''}${c.botOnly?' (доверенный бот)':''} | ${c.origin==='existing'?'Сохранена':'Добавлена'}${c.hidden?' / служебная':''} | ${escape(c.example)} |`);
+fs.writeFileSync(path.join(root,'command-catalog.md'),`# Полный реестр команд\n\nИсточник: src/commandSystem/registry.js. Обновление: npm run commands:catalog.\n\nВсего ${list.length} записей: ${list.filter(c=>c.availability.telegram&&!c.hidden).length} видимых команд Telegram, ${list.filter(c=>c.availability.web&&!c.hidden).length} веб-команд, ${list.filter(c=>c.availability.userbot).length} команд отдельного userbot, 2 служебные записи (bot_chat, select). Права владельца проверяются при каждом выполнении.\n\nСовместимые названия без дублирования реализации: ${Object.entries(aliases).map(([name,target])=>`/${name} → /${target.id}${target.defaultArgs?' '+target.defaultArgs:''}`).join('; ')}.\n\nСхема входа каждой команды — объект с единственным строковым полем args, максимум 16000 символов, без управляющих символов. Команда дополнительно проверяет собственный синтаксис, диапазоны и состояние сценария.\n\n| Команда | Описание | Категория | Интерфейсы | Происхождение | Пример аргументов |\n|---|---|---|---|---|---|\n${rows.join('\n')}\n`);
+console.log(`Exported ${list.length} command definitions.`);

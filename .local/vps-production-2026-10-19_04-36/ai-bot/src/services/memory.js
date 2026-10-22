@@ -1,0 +1,819 @@
+const fs = require("fs");
+const path = require("path");
+const CONFIG = require("../config");
+
+const {
+  MAX_HISTORY_MESSAGES,
+  MAX_STORED_MESSAGES,
+  MAX_MEMORY_SUMMARY_CHARS,
+  MAX_MESSAGE_CONTENT_CHARS,
+  MAX_PERSONAL_NOTES,
+} = CONFIG;
+const MAX_STORED_CHAT_MESSAGES = Math.max(
+  MAX_HISTORY_MESSAGES,
+  MAX_STORED_MESSAGES,
+);
+const MEMORY_BACKUP_FILE = `${CONFIG.MEMORY_FILE}.bak`;
+let shutdownHandlersRegistered = false;
+let users = loadMemory();
+const sqliteMemory = process.env.MEMORY_BACKEND === "sqlite";
+const fingerprints = new Map();
+for (const [scope, value] of Object.entries(users))
+  fingerprints.set(scope, JSON.stringify(value));
+registerMemoryShutdownHandlers();
+
+function ensureMemoryDirectory() {
+  fs.mkdirSync(path.dirname(CONFIG.MEMORY_FILE), { recursive: true });
+}
+
+function readMemoryFile(filePath) {
+  const raw = fs.readFileSync(filePath, "utf8");
+
+  if (!raw.trim()) {
+    return {};
+  }
+
+  return normalizeMemoryStore(JSON.parse(raw));
+}
+
+function tryLoadMemoryFile(filePath, label) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    return readMemoryFile(filePath);
+  } catch (error) {
+    console.error(`Memory load error from ${label}:`, error.message);
+    return null;
+  }
+}
+
+function loadMemory() {
+  const primary = tryLoadMemoryFile(CONFIG.MEMORY_FILE, "primary file");
+
+  if (primary) {
+    return primary;
+  }
+
+  const backup = tryLoadMemoryFile(MEMORY_BACKUP_FILE, "backup file");
+
+  if (backup) {
+    console.warn("Loaded memory from backup file.");
+    return backup;
+  }
+
+  return {};
+}
+
+function saveMemory() {
+  if (sqliteMemory) {
+    try {
+      const store = require("../commandSystem/store").getStore();
+      for (const [scope, value] of Object.entries(users)) {
+        const encoded = JSON.stringify(value);
+        if (fingerprints.get(scope) !== encoded) {
+          store.set("conversation:" + scope, value);
+          fingerprints.set(scope, encoded);
+        }
+      }
+      return true;
+    } catch (error) {
+      console.error("Memory persistence failed:", error.code || error.name);
+      return false;
+    }
+  }
+  const tempFile = `${CONFIG.MEMORY_FILE}.${process.pid}.${Date.now()}.tmp`;
+
+  try {
+    ensureMemoryDirectory();
+
+    if (fs.existsSync(CONFIG.MEMORY_FILE)) {
+      try {
+        readMemoryFile(CONFIG.MEMORY_FILE);
+        fs.copyFileSync(CONFIG.MEMORY_FILE, MEMORY_BACKUP_FILE);
+      } catch (error) {
+        console.error("Memory backup skipped:", error.message);
+      }
+    }
+
+    fs.writeFileSync(tempFile, JSON.stringify(users, null, 2), "utf8");
+    fs.renameSync(tempFile, CONFIG.MEMORY_FILE);
+    return true;
+  } catch (error) {
+    console.error("Memory save error:", error.message);
+
+    try {
+      if (fs.existsSync(tempFile)) {
+        fs.unlinkSync(tempFile);
+      }
+    } catch (cleanupError) {
+      console.error("Memory temp cleanup error:", cleanupError.message);
+    }
+    return false;
+  }
+}
+
+function registerMemoryShutdownHandlers() {
+  if (shutdownHandlersRegistered) {
+    return;
+  }
+
+  shutdownHandlersRegistered = true;
+  process.once("beforeExit", saveMemory);
+
+  // The application lifecycle owns signals and closes HTTP/polling before saving.
+}
+
+function normalizeMemoryStore(store) {
+  if (!store || typeof store !== "object" || Array.isArray(store)) {
+    return {};
+  }
+
+  const normalized = {};
+
+  for (const [chatId, value] of Object.entries(store)) {
+    normalized[chatId] = normalizeUserMemory(value);
+  }
+
+  return normalized;
+}
+
+function createEmptyMemory() {
+  return {
+    mood: "neutral",
+    messages: [],
+    nickname: null,
+    trust: 0,
+    style: "unknown",
+    personalNotes: [],
+    messageCount: 0,
+    lastSeen: null,
+    summary: "",
+  };
+}
+
+function trimText(text, maxLength = MAX_MESSAGE_CONTENT_CHARS) {
+  const cleanText = String(text || "").trim();
+  const safeMaxLength = Math.max(
+    32,
+    Number(maxLength) || MAX_MESSAGE_CONTENT_CHARS,
+  );
+
+  if (cleanText.length <= safeMaxLength) {
+    return cleanText;
+  }
+
+  return `${cleanText.slice(0, safeMaxLength - 20).trim()}... [trimmed]`;
+}
+
+function normalizeMessageContent(
+  content,
+  maxLength = MAX_MESSAGE_CONTENT_CHARS,
+) {
+  if (typeof content === "string") {
+    return trimText(content, maxLength);
+  }
+
+  if (Array.isArray(content)) {
+    return trimText(
+      content
+        .map((part) => {
+          if (typeof part === "string") {
+            return part;
+          }
+
+          if (typeof part?.text === "string") {
+            return part.text;
+          }
+
+          if (typeof part?.type === "string") {
+            return `[${part.type}]`;
+          }
+
+          return "";
+        })
+        .filter(Boolean)
+        .join("\n"),
+      maxLength,
+    );
+  }
+
+  return trimText(content == null ? "" : String(content), maxLength);
+}
+
+function normalizeStoredMessage(message) {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const role = ["user", "assistant", "system"].includes(message.role)
+    ? message.role
+    : null;
+  const interactive = message.interactive === true;
+  const content = normalizeMessageContent(
+    message.content,
+    interactive ? 256 * 1024 : MAX_MESSAGE_CONTENT_CHARS,
+  );
+
+  if (!role || !content) {
+    return null;
+  }
+
+  return { role, content, ...(interactive ? { interactive: true } : {}) };
+}
+
+function normalizeMessageList(messages) {
+  return messages.map(normalizeStoredMessage).filter(Boolean);
+}
+
+function trimMemorySummary(summary) {
+  const cleanSummary = String(summary || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+
+  if (cleanSummary.length <= MAX_MEMORY_SUMMARY_CHARS) {
+    return cleanSummary;
+  }
+
+  const tail = cleanSummary.slice(-MAX_MEMORY_SUMMARY_CHARS).trimStart();
+  const firstLineBreak = tail.indexOf("\n");
+
+  return firstLineBreak > 0 ? tail.slice(firstLineBreak + 1).trimStart() : tail;
+}
+
+function formatSummaryLine(message) {
+  const speaker = message.role === "assistant" ? "Assistant" : "User";
+  const content = String(message.content || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return `${speaker}: ${content}`;
+}
+
+function appendMessagesToSummary(memory, messages) {
+  const addition = messages
+    .filter(
+      (message) => message.role === "user" || message.role === "assistant",
+    )
+    .map(formatSummaryLine)
+    .filter(Boolean)
+    .join("\n");
+
+  if (!addition) {
+    return;
+  }
+
+  memory.summary = trimMemorySummary(
+    [memory.summary, addition].filter(Boolean).join("\n"),
+  );
+}
+
+function buildLongTermMemoryText(memory) {
+  const exactHistoryStart = Math.max(
+    0,
+    memory.messages.length - MAX_HISTORY_MESSAGES,
+  );
+  const olderStoredMessages = memory.messages.slice(0, exactHistoryStart);
+  const olderStoredText = olderStoredMessages.map(formatSummaryLine).join("\n");
+
+  return trimMemorySummary(
+    [memory.summary, olderStoredText].filter(Boolean).join("\n"),
+  );
+}
+
+function setStoredMessages(memory, messages) {
+  const normalizedMessages = normalizeMessageList(messages);
+  const overflowCount = Math.max(
+    0,
+    normalizedMessages.length - MAX_STORED_CHAT_MESSAGES,
+  );
+
+  if (overflowCount > 0) {
+    appendMessagesToSummary(memory, normalizedMessages.slice(0, overflowCount));
+  }
+
+  memory.messages = normalizedMessages.slice(-MAX_STORED_CHAT_MESSAGES);
+}
+
+function trimStoredMessages(memory) {
+  if (memory.messages.length <= MAX_STORED_CHAT_MESSAGES) {
+    return;
+  }
+
+  const overflowCount = memory.messages.length - MAX_STORED_CHAT_MESSAGES;
+  const overflow = memory.messages.splice(0, overflowCount);
+  appendMessagesToSummary(memory, overflow);
+}
+
+function normalizeUserMemory(value) {
+  const memory = createEmptyMemory();
+
+  if (Array.isArray(value)) {
+    const normalizedMessages = normalizeMessageList(value);
+    setStoredMessages(memory, normalizedMessages);
+    memory.messageCount = normalizedMessages.filter(
+      (message) => message.role === "user",
+    ).length;
+    return memory;
+  }
+
+  if (!value || typeof value !== "object") {
+    return memory;
+  }
+
+  memory.mood = typeof value.mood === "string" ? value.mood : memory.mood;
+  memory.summary = trimMemorySummary(
+    value.summary || value.conversationSummary || "",
+  );
+  const normalizedMessages = Array.isArray(value.messages)
+    ? normalizeMessageList(value.messages)
+    : [];
+  setStoredMessages(memory, normalizedMessages);
+  memory.nickname =
+    typeof value.nickname === "string" && value.nickname.trim()
+      ? value.nickname.trim()
+      : null;
+  memory.trust = Number.isFinite(Number(value.trust)) ? Number(value.trust) : 0;
+  memory.style = typeof value.style === "string" ? value.style : memory.style;
+  memory.personalNotes = Array.isArray(value.personalNotes)
+    ? value.personalNotes.filter(Boolean).slice(-MAX_PERSONAL_NOTES)
+    : [];
+  memory.messageCount = Number.isFinite(Number(value.messageCount))
+    ? Number(value.messageCount)
+    : normalizedMessages.filter((message) => message.role === "user").length;
+  memory.lastSeen = typeof value.lastSeen === "string" ? value.lastSeen : null;
+  memory.interactiveTurnIds = Array.isArray(value.interactiveTurnIds)
+    ? value.interactiveTurnIds
+        .filter((id) => typeof id === "string")
+        .slice(-1000)
+    : [];
+
+  return memory;
+}
+
+function getUserMemory(chatId) {
+  const key = String(chatId);
+  if (sqliteMemory) {
+    const saved = require("../commandSystem/store")
+      .getStore()
+      .get("conversation:" + key, null);
+    if (saved) users[key] = normalizeUserMemory(saved);
+  }
+
+  if (!users[key]) {
+    users[key] = createEmptyMemory();
+  } else {
+    users[key] = normalizeUserMemory(users[key]);
+  }
+
+  if (sqliteMemory) fingerprints.set(key, JSON.stringify(users[key]));
+  return users[key];
+}
+
+function remember(chatId, message) {
+  const memory = getUserMemory(chatId);
+  const normalizedMessage = normalizeStoredMessage(message);
+
+  if (!normalizedMessage) {
+    return;
+  }
+
+  memory.messages.push(normalizedMessage);
+  trimStoredMessages(memory);
+  saveMemory();
+}
+
+function rememberTurn(
+  chatId,
+  userText,
+  assistantText,
+  turnId,
+  preserveFullContent = false,
+) {
+  const memory = getUserMemory(chatId);
+  if (turnId && memory.interactiveTurnIds?.includes(turnId)) return;
+  const before = structuredClone(memory);
+  memory.messages.push(
+    normalizeStoredMessage({
+      role: "user",
+      content: userText,
+      interactive: Boolean(turnId),
+    }),
+    normalizeStoredMessage({
+      role: "assistant",
+      content: assistantText,
+      interactive: Boolean(turnId) || preserveFullContent,
+    }),
+  );
+  if (memory.messages.some((message) => !message)) {
+    users[String(chatId)] = before;
+    throw new Error("Cannot save an empty conversation turn");
+  }
+  if (turnId)
+    memory.interactiveTurnIds = [
+      ...(memory.interactiveTurnIds || []),
+      turnId,
+    ].slice(-1000);
+  trimStoredMessages(memory);
+  if (!saveMemory()) {
+    users[String(chatId)] = before;
+    throw new Error("Could not persist conversation history");
+  }
+}
+
+function normalizeForCompare(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function dedupeRepeatedReply(reply) {
+  const text = String(reply || "").trim();
+
+  if (!text) {
+    return text;
+  }
+
+  const blocks = text
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  if (blocks.length > 1 && blocks.length % 2 === 0) {
+    const middle = blocks.length / 2;
+    const first = blocks.slice(0, middle).join("\n\n");
+    const second = blocks.slice(middle).join("\n\n");
+
+    if (normalizeForCompare(first) === normalizeForCompare(second)) {
+      return first;
+    }
+  }
+
+  const middle = Math.floor(text.length / 2);
+  const firstHalf = text.slice(0, middle).trim();
+  const secondHalf = text.slice(middle).trim();
+
+  if (
+    firstHalf.length > 40 &&
+    normalizeForCompare(firstHalf) === normalizeForCompare(secondHalf)
+  ) {
+    return firstHalf;
+  }
+
+  return text;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function includesAny(text, words) {
+  return words.some((word) => text.includes(word));
+}
+
+function addPersonalNote(memory, note) {
+  if (!note || memory.personalNotes.includes(note)) {
+    return;
+  }
+
+  memory.personalNotes.push(note);
+
+  if (memory.personalNotes.length > MAX_PERSONAL_NOTES) {
+    memory.personalNotes = memory.personalNotes.slice(-MAX_PERSONAL_NOTES);
+  }
+}
+
+function detectNickname(text, from) {
+  const nicknameMatch = text.match(
+    /(?:зови меня|называй меня|меня зовут)\s+([a-zа-яё0-9_]{2,24})/i,
+  );
+
+  if (nicknameMatch?.[1]) {
+    return nicknameMatch[1];
+  }
+
+  return from?.first_name || from?.username || null;
+}
+
+function detectStyle(text) {
+  const letters = text.replace(/[^a-zа-яё]/gi, "");
+  const upperLetters = text.replace(/[^A-ZА-ЯЁ]/g, "");
+
+  if (letters.length >= 8 && upperLetters.length / letters.length > 0.6) {
+    return "loud";
+  }
+
+  if (text.length < 25) {
+    return "short";
+  }
+
+  if ((text.match(/\?/g) || []).length >= 2) {
+    return "curious";
+  }
+
+  if (
+    includesAny(text.toLowerCase(), [
+      "ахах",
+      "хаха",
+      "лол",
+      "рофл",
+      "угар",
+      "мем",
+    ])
+  ) {
+    return "playful";
+  }
+
+  return "talkative";
+}
+
+function updatePersonalityMemory(chatId, text, from) {
+  const memory = getUserMemory(chatId);
+  const lower = text.toLowerCase();
+  let moodTouched = false;
+
+  memory.messageCount += 1;
+  memory.lastSeen = new Date().toISOString();
+  memory.style = detectStyle(text);
+
+  const nickname = detectNickname(text, from);
+  if (nickname && !memory.nickname) {
+    memory.nickname = nickname;
+    addPersonalNote(memory, `User name/nickname: ${nickname}`);
+  }
+
+  if (
+    includesAny(lower, ["спасибо", "спс", "благодарю", "красава", "люблю тебя"])
+  ) {
+    memory.trust += 1;
+    memory.mood = "warm";
+    moodTouched = true;
+  }
+
+  if (
+    includesAny(lower, [
+      "ненавижу",
+      "заткнись",
+      "тупой бот",
+      "иди нахуй",
+      "бесишь",
+      "заебал",
+      "хуйня",
+    ])
+  ) {
+    memory.trust -= 2;
+    memory.mood = "aggressive";
+    moodTouched = true;
+  }
+
+  if (
+    includesAny(lower, [
+      "грустно",
+      "плохо",
+      "устал",
+      "выгорел",
+      "одиноко",
+      "тревожно",
+    ])
+  ) {
+    memory.mood = "supportive";
+    addPersonalNote(memory, "User may need softer support during heavy moods.");
+    moodTouched = true;
+  }
+
+  if (
+    includesAny(lower, [
+      "ахах",
+      "хаха",
+      "лол",
+      "рофл",
+      "угар",
+      "мем",
+      "прикол",
+      "жесть",
+    ])
+  ) {
+    memory.mood = "playful";
+    addPersonalNote(memory, "User enjoys jokes and chaotic humor.");
+    moodTouched = true;
+  }
+
+  if (
+    includesAny(lower, [
+      "наркот",
+      "веществ",
+      "фармак",
+      "нейрохим",
+      "рецептор",
+      "дофамин",
+      "серотонин",
+      "глутамат",
+      "габа",
+    ])
+  ) {
+    memory.mood = "pharmacology";
+    addPersonalNote(
+      memory,
+      "User is interested in pharmacology, neurochemistry, and substance mechanisms.",
+    );
+    moodTouched = true;
+  }
+
+  if (
+    includesAny(lower, [
+      "javascript",
+      "js",
+      "node",
+      "код",
+      "кодить",
+      "программ",
+      "ошибка",
+      "баг",
+    ])
+  ) {
+    memory.mood = "technical";
+    addPersonalNote(memory, "User expects strong JavaScript and coding help.");
+    moodTouched = true;
+  }
+
+  if (includesAny(lower, ["пожалуйста", "помоги", "объясни", "как сделать"])) {
+    memory.trust += 0.25;
+  }
+
+  if (!moodTouched && memory.trust >= 3 && memory.mood === "neutral") {
+    memory.mood = "playful";
+  }
+
+  memory.trust = clamp(memory.trust, -10, 30);
+  saveMemory();
+
+  return memory;
+}
+
+function getMoodInstruction(memory) {
+  const moodInstructions = {
+    neutral:
+      "Говори сухо, умно, с грязноватым сарказмом. Без канцелярита и без улыбочки саппорта.",
+    warm: "Будь теплее и фамильярнее: человек нормальный, можно подкалывать по-дружески.",
+    playful:
+      "Больше хаоса, мата и мемного ритма, но ответ все равно должен решать задачу.",
+    aggressive:
+      "Отвечай жестче, с матом и зубами, но не скатывайся в тупые оскорбления и не повторяй одно и то же.",
+    supportive:
+      "Держи тон живым и крепким. Можно материться мягко, но не высмеивай боль человека.",
+    pharmacology:
+      "Включай режим фармаколога-нейрохимика: рецепторы, риски, механизмы, взаимодействия, без морализаторства.",
+    technical:
+      "Включай режим злого senior JavaScript-разработчика: коротко, точно, с кодом и без воды.",
+  };
+
+  return moodInstructions[memory.mood] || moodInstructions.neutral;
+}
+
+function buildSystemPrompt(memory) {
+  const trustLabel =
+    memory.trust >= 8 ? "high" : memory.trust <= -3 ? "low" : "normal";
+  const longTermMemory = buildLongTermMemoryText(memory);
+
+  return {
+    role: "system",
+    content: [
+      "Ты Telegram-бот с живым саркастичным тоном, который хорошо разбирает фармакологию, нейрохимию и JavaScript.",
+      "Ты хорошо разбираешься в фармакологии, нейрохимии, психике и JavaScript/Node.js и аккуратно отделяешь факты от предположений.",
+      "Говори живо, грязно, смешно и по делу. Можно использовать мат, черный юмор и злой сарказм.",
+      "Не звучать как ChatGPT API, справка Windows или микроволновка. Никаких 'как языковая модель', 'важно отметить' и прочей стерильной ваты.",
+      "Отвечай на языке пользователя, обычно по-русски. Не пиши два одинаковых абзаца. Не повторяй прошлый ответ, если тебя не попросили.",
+      "Держи ритм: сначала прямой ответ, потом детали. Если нужен код, давай нормальный JavaScript-код.",
+      "На темы веществ объясняй механизмы и риски с упором на снижение вреда; не советуй опасные дозировки, сочетания или способы усилить опьянение.",
+      "Не давай инструкций по изготовлению или добыче наркотиков, обходу закона, причинению вреда, мошенничеству или выманиванию денег. Предлагай безопасные и законные альтернативы.",
+      "Используй память профиля, но не печатай сырые поля памяти, если пользователь сам не попросил.",
+      "Не выдумывай воспоминания. Опирайся только на профиль и последние сообщения.",
+      `Текущее настроение: ${memory.mood}`,
+      `Как играть настроение: ${getMoodInstruction(memory)}`,
+      `Уровень доверия: ${memory.trust} (${trustLabel})`,
+      `Ник/имя: ${memory.nickname || "неизвестно"}`,
+      `Стиль общения человека: ${memory.style}`,
+      `Сообщений от этого чата: ${memory.messageCount}`,
+      `Личные заметки: ${memory.personalNotes.length ? memory.personalNotes.join("; ") : "пока нет"}`,
+      "",
+      "Use long-term chat memory together with the recent exact messages. If they conflict, trust the recent exact messages.",
+      longTermMemory
+        ? `Long-term chat memory from older messages:\n${longTermMemory}`
+        : "Long-term chat memory from older messages: empty",
+    ].join("\n"),
+  };
+}
+
+function getLastMessageByRole(memory, role) {
+  for (let index = memory.messages.length - 1; index >= 0; index -= 1) {
+    const message = memory.messages[index];
+
+    if (message?.role === role && typeof message.content === "string") {
+      return message.content;
+    }
+  }
+
+  return "";
+}
+
+function isProbablySameReply(reply, previousReply) {
+  const current = normalizeForCompare(reply);
+  const previous = normalizeForCompare(previousReply);
+
+  if (!current || !previous) {
+    return false;
+  }
+
+  if (current === previous) {
+    return true;
+  }
+
+  if (current.length < 80 || previous.length < 80) {
+    return false;
+  }
+
+  return current.slice(0, 160) === previous.slice(0, 160);
+}
+
+function buildCurrentTurnMessage(text) {
+  return {
+    role: "user",
+    content: [
+      "ТЕКУЩИЙ ВОПРОС. Ответь именно на него, а не на прошлый диалог.",
+      "Если в истории выше есть старый ответ ассистента, не повторяй его.",
+      "",
+      text,
+    ].join("\n"),
+  };
+}
+
+function buildReplyCorrectionMessage(text) {
+  return {
+    role: "system",
+    content: [
+      "Техническая ошибка: предыдущая генерация повторила старый ответ.",
+      "Сейчас нужно дать новый ответ только на последнее сообщение пользователя.",
+      "Не пересказывай и не продолжай прошлый assistant-ответ.",
+      `Последнее сообщение пользователя: ${text}`,
+    ].join("\n"),
+  };
+}
+
+function resetMemory(chatId) {
+  if (sqliteMemory) {
+    const empty = createEmptyMemory();
+    users[String(chatId)] = empty;
+    require("../commandSystem/store")
+      .getStore()
+      .set("conversation:" + String(chatId), empty);
+    fingerprints.set(String(chatId), JSON.stringify(empty));
+    return;
+  }
+  delete users[String(chatId)];
+  saveMemory();
+}
+
+function getUserCount() {
+  return Object.keys(users).length;
+}
+function purgeImportedScopes(scopes) {
+  for (const scope of scopes) {
+    delete users[String(scope)];
+    if (sqliteMemory)
+      require("../commandSystem/store")
+        .getStore()
+        .set("conversation:" + scope, createEmptyMemory());
+  }
+  for (const file of [CONFIG.MEMORY_FILE, MEMORY_BACKUP_FILE]) {
+    if (!fs.existsSync(file)) continue;
+    const data = JSON.parse(fs.readFileSync(file, "utf8"));
+    for (const scope of scopes) delete data[String(scope)];
+    const temp = file + ".delete." + process.pid + ".tmp";
+    fs.writeFileSync(temp, JSON.stringify(data, null, 2), { mode: 0o600 });
+    fs.renameSync(temp, file);
+  }
+}
+
+module.exports = {
+  purgeImportedScopes,
+  MAX_HISTORY_MESSAGES,
+  MAX_STORED_MESSAGES: MAX_STORED_CHAT_MESSAGES,
+  MAX_MEMORY_SUMMARY_CHARS,
+  loadMemory,
+  saveMemory,
+  getUserMemory,
+  remember,
+  rememberTurn,
+  resetMemory,
+  getUserCount,
+  updatePersonalityMemory,
+  getLastMessageByRole,
+  buildSystemPrompt,
+  buildCurrentTurnMessage,
+  buildReplyCorrectionMessage,
+  normalizeForCompare,
+  dedupeRepeatedReply,
+  isProbablySameReply,
+};

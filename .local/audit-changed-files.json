@@ -1,0 +1,50 @@
+[
+  {
+    "file": "public\\product.js",
+    "status": "CHANGED"
+  },
+  {
+    "file": "src\\commands.js",
+    "status": "CHANGED"
+  },
+  {
+    "file": "src\\commandSystem\\engine.js",
+    "status": "CHANGED"
+  },
+  {
+    "file": "src\\commandSystem\\registry.js",
+    "status": "CHANGED"
+  },
+  {
+    "file": "src\\commandSystem\\store.js",
+    "status": "CHANGED"
+  },
+  {
+    "file": "src\\commandSystem\\userbot.js",
+    "status": "CHANGED"
+  },
+  {
+    "file": "src\\services\\conversation.js",
+    "status": "CHANGED"
+  },
+  {
+    "file": "src\\services\\openrouter.js",
+    "status": "CHANGED"
+  },
+  {
+    "file": "src\\services\\preferences.js",
+    "status": "CHANGED"
+  },
+  {
+    "file": "tests\\interactiveIntegration.test.js",
+    "status": "CHANGED"
+  },
+  {
+    "file": "tests\\e2e\\commands.spec.js",
+    "status": "CHANGED"
+  },
+  {
+    "file": "tests\\e2e\\product.spec.js",
+    "status": "CHANGED"
+  }
+]

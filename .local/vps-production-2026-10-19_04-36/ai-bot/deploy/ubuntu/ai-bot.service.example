@@ -1,0 +1,39 @@
+[Unit]
+Description=AI Telegram bot
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ai-bot
+Group=ai-bot
+WorkingDirectory=/opt/ai-bot/current
+Environment=NODE_ENV=production
+Environment=DOTENV_CONFIG_PATH=/var/lib/ai-bot/config/.env
+Environment=CONFIG_ENV_FILE=/var/lib/ai-bot/config/.env
+ExecStartPre=/usr/bin/node /opt/ai-bot/current/scripts/check-vps.js --env /var/lib/ai-bot/config/.env
+ExecStart=/usr/bin/node --require dotenv/config /opt/ai-bot/current/index.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+StateDirectory=ai-bot
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-bot
+
+[Install]
+WantedBy=multi-user.target
