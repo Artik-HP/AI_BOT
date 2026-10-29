@@ -67,6 +67,14 @@ class FakeTelegram {
   }
 
   enqueue(update) {
+    if (this.beforeEnqueue) {
+      this.beforeEnqueue(update).then(() => this.enqueueReady(update)).catch((error) => { (this.dispatchErrors ||= []).push(error.message); });
+      return;
+    }
+    this.enqueueReady(update);
+  }
+
+  enqueueReady(update) {
     update.update_id = update.update_id || ++this.updateSeq;
     this.queue.push(update);
 

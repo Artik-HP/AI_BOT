@@ -11,7 +11,8 @@ const {
   isFileTooLargeError,
   sendAIResponse
 } = require("../services/telegram");
-const { admitMessage, showTyping } = require("./guard");
+const { admitMessage, showTyping, messageAuthorized } = require("./guard");
+const { withMessageAuth } = require("../services/auth");
 
 const AUDIO_ERROR_MESSAGE = "Не получилось обработать голосовое сообщение. Попробуй ещё раз или отправь покороче.";
 
@@ -74,16 +75,20 @@ function getAudioFormat(file) {
 }
 
 async function handleAudioMessage(bot, chatId, msg, audio) {
+  if (!messageAuthorized(msg)) return;
   await showTyping(bot, chatId);
 
   const audioBuffer = await downloadTelegramFile(audio.fileId);
+  if (!messageAuthorized(msg)) return;
   const transcript = await transcribeAudio(audioBuffer, audio.format);
+  if (!messageAuthorized(msg)) return;
   const caption = msg.caption?.trim();
   const userText = caption
     ? `Voice message transcript: ${transcript}\nCaption: ${caption}`
     : transcript;
 
   const aiReply = await askAI(chatId, userText, msg.from);
+  if (!messageAuthorized(msg)) return;
   await sendAIResponse(chatId, aiReply, { sourceMessageId: msg.message_id, ...getBotToBotReplyOptions(msg) });
 }
 
@@ -109,14 +114,15 @@ function registerVoiceHandler(bot) {
       return;
     }
 
-    await enqueueChatTask(chatId, async () => {
+    await enqueueChatTask(chatId, () => withMessageAuth(msg, async () => {
       try {
         await handleAudioMessage(bot, chatId, msg, audio);
       } catch (error) {
+        if (!messageAuthorized(msg)) return;
         logger.error("Audio transcription error:", error, error.transcriptionErrors || "");
         await trySendMessage(bot, chatId, isFileTooLargeError(error) ? buildAudioTooLargeMessage() : AUDIO_ERROR_MESSAGE);
       }
-    });
+    }));
   }));
 }
 

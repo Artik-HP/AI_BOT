@@ -6,6 +6,8 @@ const { createTtlSet } = require("../utils/ttlSet");
 const { TELEGRAM_MESSAGE_LIMIT } = require("../utils/text");
 const { draftAccountReply } = require("./openrouter");
 const { isAddressedToThisBot } = require("./telegram");
+const { auth } = require("./auth");
+const { admitMessage, admitCallback } = require("../handlers/guard");
 
 const { parseBoolean } = CONFIG;
 const MAX_BURST_ITEMS = 20;
@@ -303,6 +305,7 @@ function buildAccountAssistantConfigText() {
 }
 
 async function sendDirectAccountMessage(chatId, text) {
+  if (!auth.authenticated(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID)) throw new Error("AUTH_REQUIRED");
   if (!accountClient) {
     throw new Error("Account client is not connected");
   }
@@ -330,7 +333,7 @@ function isOwnerActor(chatId, userId) {
   return Boolean(
     ownerId &&
     String(chatId) === String(ownerId) &&
-    (userId == null || String(userId) === String(ownerId))
+    userId != null && String(userId) === String(ownerId)
   );
 }
 
@@ -393,6 +396,7 @@ function blockDraftSender(draft) {
 }
 
 async function editOwnerNotice(draft, text) {
+  if (!auth.valid(draft.authLease)) return;
   if (!controlBot || !draft.noticeMessageId || !CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID) {
     return;
   }
@@ -404,7 +408,7 @@ async function editOwnerNotice(draft, text) {
 }
 
 async function notifyOwner(chatId, text) {
-  if (!controlBot || !chatId) {
+  if (!controlBot || !chatId || !auth.authenticated(chatId)) {
     return;
   }
 
@@ -419,6 +423,7 @@ function storePendingDraft(draft) {
 }
 
 async function notifyOwnerAboutDraft(draft, title) {
+  if (!auth.valid(draft.authLease)) return;
   if (!controlBot || !CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID) {
     logger.warn("Account assistant draft skipped: owner chat id is not configured.");
     return;
@@ -435,6 +440,7 @@ async function notifyOwnerAboutDraft(draft, title) {
 }
 
 async function sendAccountText(draft, text) {
+  if (!auth.valid(draft.authLease)) throw new Error("AUTH_REQUIRED");
   const message = trimText(text, CONFIG.ACCOUNT_ASSISTANT_MAX_TEXT_CHARS);
 
   if (!message) {
@@ -448,7 +454,7 @@ async function sendAccountText(draft, text) {
       linkPreview: false
     });
   } catch (error) {
-    if (!draft.replyToMessageId) {
+    if (!draft.replyToMessageId || !auth.valid(draft.authLease)) {
       throw error;
     }
 
@@ -466,6 +472,11 @@ function createBusyError() {
 // Only one caller at a time may send a draft: a double tap must not message the contact twice.
 function claimDraft(id) {
   const draft = pendingDrafts.get(id);
+
+  if (draft && !auth.valid(draft.authLease)) {
+    pendingDrafts.delete(id);
+    throw new Error("Draft not found or expired");
+  }
 
   if (!draft) {
     throw new Error("Draft not found or expired");
@@ -550,12 +561,14 @@ function dispatchEntry(entry) {
   return enqueueChatTask(entry.chatId, () => processEntry(entry));
 }
 
-async function processEntry({ message, incomingText, profile, chatId }) {
+async function processEntry({ message, incomingText, profile, chatId, authLease }) {
+  if (!auth.valid(authLease) || !accountAssistantEnabled) return;
   if (CONFIG.ACCOUNT_ASSISTANT_REPLY_DELAY_MS > 0) {
     await delay(CONFIG.ACCOUNT_ASSISTANT_REPLY_DELAY_MS);
   }
 
   const inputChat = await message.getInputChat();
+  if (!auth.valid(authLease) || !accountAssistantEnabled) return;
 
   if (!inputChat) {
     logger.warn(`Account assistant skipped ${chatId}: could not resolve input chat.`);
@@ -566,6 +579,7 @@ async function processEntry({ message, incomingText, profile, chatId }) {
 
   try {
     draft = await draftAccountReply(`account:${chatId}`, incomingText, profile);
+    if (!auth.valid(authLease) || !accountAssistantEnabled) return;
   } catch (error) {
     logger.error(`Account assistant could not draft a reply for ${chatId}:`, error);
     await notifyOwner(
@@ -576,6 +590,7 @@ async function processEntry({ message, incomingText, profile, chatId }) {
   }
 
   const pendingDraft = {
+    authLease,
     id: createDraftId(),
     chatId,
     senderId: profile.id,
@@ -610,6 +625,8 @@ async function processEntry({ message, incomingText, profile, chatId }) {
 }
 
 async function processIncomingAccountMessage(event) {
+  const authLease = auth.capture(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID);
+  if (!auth.valid(authLease)) return;
   if (!accountAssistantEnabled || !started || !accountClient) {
     return;
   }
@@ -643,7 +660,7 @@ async function processIncomingAccountMessage(event) {
     return;
   }
 
-  const entry = { message, incomingText, profile, chatId };
+  const entry = { message, incomingText, profile, chatId, authLease };
   const waitMs = getRemainingThrottleMs(chatId);
 
   if (waitMs > 0 || pendingBursts.has(String(chatId))) {
@@ -674,6 +691,7 @@ async function handleAccountCallback(query) {
     await answerCallback(query, "Эта кнопка доступна только владельцу.");
     return;
   }
+  if (!await admitCallback(controlBot, query)) return;
 
   const [, action, id] = data.split(":");
   const draft = pendingDrafts.get(id);
@@ -764,6 +782,7 @@ async function sendStatus(chatId) {
 }
 
 async function sendPendingList(chatId) {
+  for (const [key, draft] of pendingDrafts) if (!auth.valid(draft.authLease)) pendingDrafts.delete(key);
   if (!pendingDrafts.size) {
     await controlBot.sendMessage(chatId, "Активных черновиков нет.");
     return;
@@ -925,6 +944,7 @@ function registerControlBotHandlers(bot) {
       if (msg.from?.is_bot || !isAddressedToThisBot(msg.text) || !isOwnerActor(msg.chat.id, msg.from?.id)) {
         return;
       }
+      if (!await admitMessage(bot, msg)) return;
 
       await handler(msg, match);
     }));

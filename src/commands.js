@@ -79,10 +79,15 @@ const PUBLIC_COMMANDS = [
   { command: "voice", description: "Как работают голосовые", usage: "/voice - как отправлять голосовые" },
   { command: "status", description: "Проверить память и лимиты", usage: "/status - память и лимиты" },
   { command: "reset", description: "Очистить память этого чата", usage: "/reset - очистить память этого чата" },
+  { command: "login", description: "Войти по паролю", usage: "/login - войти заново" },
+  { command: "logout", description: "Закрыть доступ", usage: "/logout - выйти и закрыть доступ" },
+  { command: "me", description: "Мой доступ", usage: "/me - срок и статус доступа" },
   ...(CONFIG.AI_LAB_ENABLED ? [{ command: "lab", description: "AI-лаборатория", usage: "/lab - идеи, эксперименты, обучение и инструменты" }] : [])
 ];
 
 const OWNER_COMMANDS = [
+  { command: "users", description: "Пользователи продукта", usage: "/users - пользователи и доступ" },
+  { command: "access", description: "Доступ: ID active|blocked [дни]", usage: "/access ID active|blocked [дни] - предварительный просмотр изменения доступа" },
   { command: "account_help", description: "Список команд аккаунт-ассистента", usage: "/account_help - показать команды аккаунт-ассистента" },
   { command: "account_status", description: "Статус Telegram-ассистента аккаунта", usage: "/account_status - статус ассистента аккаунта" },
   { command: "account_config", description: "Показать настройки аккаунт-ассистента", usage: "/account_config - настройки аккаунт-ассистента" },
@@ -196,6 +201,7 @@ async function sendMainMenu(chatId) {
     chatId,
     [
       "Я на месте. Кнопки снизу, голосовые тоже слушаю.",
+      CONFIG.PRODUCT_NAME,
       "",
       "Можешь просто писать текстом, отправлять voice или выбрать команду:"
     ].join("\n"),

@@ -33,7 +33,7 @@ function createFakeBot() {
         const match = regexp.exec(text);
 
         if (match) {
-          await callback({ chat: { id: chatId }, from: { id: fromId }, text }, match);
+          await callback({ chat: { id: chatId, type: "private" }, from: { id: fromId }, text }, match);
           return true;
         }
       }
@@ -45,7 +45,7 @@ function createFakeBot() {
         id: `q${Math.random()}`,
         data,
         from: { id: fromId },
-        message: { chat: { id: chatId }, message_id: 1 }
+        message: { chat: { id: chatId, type: "private" }, message_id: 1 }
       })));
     },
     lastText() {

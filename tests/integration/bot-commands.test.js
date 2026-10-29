@@ -113,9 +113,9 @@ test("меню команд Telegram: публичные всем, полное 
     const publicMenu = calls.find((call) => !call.scope);
     const ownerMenu = calls.find((call) => call.scope);
 
-    assert.deepEqual(publicMenu.commands.map((entry) => entry.command), ["start", "menu", "help", "voice", "status", "reset", "lab"]);
+    assert.deepEqual(publicMenu.commands.map((entry) => entry.command), ["start", "menu", "help", "voice", "status", "reset", "login", "logout", "me", "lab"]);
     assert.deepEqual(ownerMenu.scope, { type: "chat", chat_id: OWNER });
-    assert.equal(ownerMenu.commands.length, 26);
+    assert.equal(ownerMenu.commands.length, 31);
     assert.ok(ownerMenu.commands.some((entry) => entry.command === "account_unblock"));
     assert.ok(ownerMenu.commands.every((entry) => entry.description.length <= 256 && /^[a-z0-9_]{1,32}$/.test(entry.command)));
   });

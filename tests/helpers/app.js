@@ -6,6 +6,7 @@ const os = require("os");
 const path = require("path");
 const { FakeTelegram } = require("./fakeTelegram");
 const { FakeOpenRouter, TEST_OPENROUTER_KEY } = require("./fakeOpenRouter");
+const { TEST_PASSWORD, TEST_PASSWORD_HASH } = require("./authFixture");
 
 const ROOT = process.env.APP_ROOT || path.join(__dirname, "..", "..");
 const MAX_LAUNCH_ATTEMPTS = 4;
@@ -25,7 +26,7 @@ function freePort() {
 // LEGACY_BASELINE=1 (with APP_ROOT=<pre-audit checkout>) runs the pre-audit code, which cannot be pointed
 // at the fakes through environment variables, via the redirect shim from the audit evidence.
 // It is how the audit proves that these tests fail on the old code.
-async function launchApp({ tg, or, env = {}, entry = "index.js", legacy = process.env.LEGACY_BASELINE === "1", port }) {
+async function launchApp({ tg, or, env = {}, entry = "index.js", legacy = process.env.LEGACY_BASELINE === "1", port, authenticatedFixtures = true }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aibot-it-"));
   const appPort = port || await freePort();
   const mergedEnv = {
@@ -35,6 +36,7 @@ async function launchApp({ tg, or, env = {}, entry = "index.js", legacy = proces
     APP_ROOT: ROOT,
     BOT_TOKEN: tg.token,
     OPENROUTER_API_KEY: TEST_OPENROUTER_KEY,
+    BOT_PASSWORD_HASH: TEST_PASSWORD_HASH,
     PORT: String(appPort),
     MEMORY_FILE: path.join(tmp, "memory.json"),
     MEMORY_SAVE_DEBOUNCE_MS: "40",
@@ -66,6 +68,37 @@ async function launchApp({ tg, or, env = {}, entry = "index.js", legacy = proces
   child.stdout.on("data", (data) => chunks.push(String(data)));
   child.stderr.on("data", (data) => chunks.push(String(data)));
 
+  const authRequests = new Map();
+  let sequence = 0;
+  child.on("message", (message) => {
+    if (message?.type === "test-auth-result") {
+      authRequests.get(message.requestId)?.(message.ok);
+      authRequests.delete(message.requestId);
+    }
+  });
+  const authenticate = (userId, password = TEST_PASSWORD) => new Promise((resolve, reject) => {
+    const requestId = ++sequence;
+    const timer = setTimeout(() => { authRequests.delete(requestId); reject(new Error("test login timed out")); }, 8000);
+    authRequests.set(requestId, (ok) => { clearTimeout(timer); ok ? resolve() : reject(new Error("test login failed")); });
+    child.send({ type: "test-auth", requestId, userId, password }, (error) => { if (error) { clearTimeout(timer); authRequests.delete(requestId); reject(error); } });
+  });
+  if (authenticatedFixtures && !legacy) {
+    // Feature tests establish real password-verified sessions through a TEST-ONLY IPC preload.
+    // Authentication boundary tests turn this fixture off and use actual Telegram /start/password.
+    const users = new Map();
+    let loginQueue = Promise.resolve();
+    tg.beforeEnqueue = async (update) => {
+      const actor = update.message?.from || update.callback_query?.from;
+      if (!actor || actor.is_bot) return;
+      if (!users.has(actor.id)) {
+        const login = loginQueue.then(() => authenticate(actor.id));
+        loginQueue = login.catch(() => {});
+        users.set(actor.id, login);
+      }
+      await users.get(actor.id);
+    };
+  } else tg.beforeEnqueue = null;
+
   return {
     child,
     port: appPort,
@@ -74,6 +107,7 @@ async function launchApp({ tg, or, env = {}, entry = "index.js", legacy = proces
     output: () => chunks.join(""),
     exited: () => exited,
     exitPromise,
+    authenticate,
     terminate() {
       // Windows kill(SIGTERM) is forceful and cannot test JS cleanup. Exercise the same handler via IPC.
       if (process.platform === "win32") child.send({ type: "test-sigterm" });
@@ -142,7 +176,7 @@ async function withApp(options, fn) {
     // freePort() frees the port before the bot binds it, and tests run in parallel processes: now and then another
     // process grabs that very port in between. That is a property of the harness, not of the bot, so start again.
     for (let attempt = 1; ; attempt += 1) {
-      app = await (options.launch || launchApp)({ tg, or, env: options.env, legacy: options.legacy });
+      app = await (options.launch || launchApp)({ tg, or, env: options.env, legacy: options.legacy, authenticatedFixtures: options.authenticatedFixtures });
 
       try {
         await waitReady(tg, app);
@@ -158,6 +192,10 @@ async function withApp(options, fn) {
       }
     }
 
+    if (options.authenticatedFixtures !== false && !options.legacy) {
+      const owners = [options.env?.BOT_OWNER_CHAT_ID, options.env?.BOT_TO_BOT_OWNER_CHAT_ID, options.env?.ACCOUNT_ASSISTANT_OWNER_CHAT_ID].filter(Boolean);
+      for (const owner of new Set(owners)) await app.authenticate(owner);
+    }
     return await fn({ tg, or, app });
   } finally {
     await app?.stop().catch(() => {});

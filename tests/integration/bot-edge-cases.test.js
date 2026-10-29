@@ -109,13 +109,13 @@ test("странные апдейты не роняют бота и не выз�
   });
 });
 
-test("сообщение без отправителя (анонимный админ) обрабатывается", async () => {
+test("сообщение без отправителя не обходит парольный вход", async () => {
   await withApp({}, async ({ tg, or }) => {
     or.chat = () => reply("ответила анониму");
     rawMessage(tg, { chat: { id: -100999, type: "supergroup", title: "группа" }, text: "привет от анонимного админа" });
-    await tg.waitFor(() => tg.texts().length >= 1, 8000, "ответ");
-
-    assert.equal(tg.texts()[0], "ответила анониму");
+    await tg.quiet(300);
+    assert.equal(or.chatRequests().length, 0);
+    assert.deepEqual(tg.texts(), []);
   });
 });
 

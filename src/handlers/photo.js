@@ -11,7 +11,8 @@ const {
   isFileTooLargeError,
   sendAIResponse
 } = require("../services/telegram");
-const { admitMessage, showTyping } = require("./guard");
+const { admitMessage, showTyping, messageAuthorized } = require("./guard");
+const { withMessageAuth } = require("../services/auth");
 
 const IMAGE_ERROR_MESSAGE = "Не получилось прочитать изображение. Попробуй другое или поменьше размером.";
 const UNSUPPORTED_IMAGE_MESSAGE = "Этот формат изображения не поддерживается. Отправь JPEG, PNG, WebP или GIF.";
@@ -107,6 +108,7 @@ function buildImageDataUrl(imageBuffer, mimeType) {
 }
 
 async function handleImageMessage(bot, chatId, msg, image) {
+  if (!messageAuthorized(msg)) return;
   await showTyping(bot, chatId);
 
   const imageBuffer = await downloadTelegramFile(image.fileId, {
@@ -114,11 +116,13 @@ async function handleImageMessage(bot, chatId, msg, image) {
     fileLabel: "Image"
   });
   const imageDataUrl = buildImageDataUrl(imageBuffer, image.mimeType);
+  if (!messageAuthorized(msg)) return;
   const prompt = msg.caption?.trim() || "Что на изображении? Опиши важные детали и ответь по сути.";
   const aiReply = await askAIWithImage(chatId, prompt, {
     dataUrl: imageDataUrl,
     mimeType: image.mimeType
   }, msg.from);
+  if (!messageAuthorized(msg)) return;
 
   await sendAIResponse(chatId, aiReply, { sourceMessageId: msg.message_id, ...getBotToBotReplyOptions(msg) });
 }
@@ -151,14 +155,15 @@ function registerPhotoHandler(bot) {
       return;
     }
 
-    await enqueueChatTask(chatId, async () => {
+    await enqueueChatTask(chatId, () => withMessageAuth(msg, async () => {
       try {
         await handleImageMessage(bot, chatId, msg, image);
       } catch (error) {
+        if (!messageAuthorized(msg)) return;
         logger.error("Image recognition error:", error);
         await trySendMessage(bot, chatId, isFileTooLargeError(error) ? buildImageTooLargeMessage() : IMAGE_ERROR_MESSAGE);
       }
-    });
+    }));
   }));
 }
 

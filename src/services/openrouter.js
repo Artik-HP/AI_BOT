@@ -1,5 +1,6 @@
 const axios = require("axios");
 const CONFIG = require("../config");
+const { checkContext } = require("./auth");
 const logger = require("../utils/logger");
 const { ApiError, describeError, isTransientError, toSafeError } = require("../utils/errors");
 const { sanitizeInline, trimLineEnds } = require("../utils/text");
@@ -61,6 +62,7 @@ function assertNoProviderError(data) {
 // Every failure leaves this function as an ApiError without the request (and its Authorization header).
 async function postJson(pathname, body, { timeout = REQUEST_TIMEOUT_MS, retries = 0, maxBytes = Infinity } = {}) {
   for (let attempt = 0; ; attempt += 1) {
+    checkContext();
     try {
       const response = await axios.post(`${CONFIG.OPENROUTER_BASE_URL}${pathname}`, body, {
         headers: buildHeaders(),
@@ -69,9 +71,11 @@ async function postJson(pathname, body, { timeout = REQUEST_TIMEOUT_MS, retries 
         maxBodyLength: Infinity
       });
 
+      checkContext();
       assertNoProviderError(response.data);
       return response.data;
     } catch (error) {
+      checkContext();
       if (attempt < retries && isTransientError(error)) {
         logger.warn(`OpenRouter ${pathname} failed, retrying:`, error);
         await delay(getRetryDelayMs(error));
@@ -168,6 +172,7 @@ async function requestWithRepeatGuard({ memory, text, history, currentTurn, requ
 }
 
 function rememberExchange(chatId, userContent, aiReply) {
+  checkContext();
   remember(chatId, {
     role: "user",
     content: userContent
@@ -449,6 +454,7 @@ function parseAccountAssistantDraft(rawReply) {
 }
 
 async function draftAccountReply(chatId, text, senderProfile = {}, options = {}) {
+  checkContext();
   const memory = getUserMemory(chatId);
   const cleanText = trimAccountReply(text);
 
@@ -482,6 +488,7 @@ async function draftAccountReply(chatId, text, senderProfile = {}, options = {})
   });
 
   const draft = parseAccountAssistantDraft(rawReply);
+  checkContext();
   remember(chatId, { role: "user", content: cleanText });
 
   if (draft.reply) {

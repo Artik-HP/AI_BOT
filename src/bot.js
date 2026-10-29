@@ -141,13 +141,16 @@ function start() {
     stopAccountAssistant
   } = require("./services/accountAssistant");
 
-  if (!CONFIG.BOT_ALLOWED_USER_IDS.length) {
-    logger.warn("BOT_ALLOWED_USER_IDS не задан: бот отвечает всем, кто ему напишет (лимит запросов на пользователя действует).");
+  if (!require("./services/auth").auth.configured()) {
+    logger.warn("BOT_PASSWORD_HASH не настроен: доступ к функциям закрыт.");
   }
 
   const bot = createTelegramBot();
+  const accounts = require("./accounts").registerAccounts(bot);
+  require("./services/auth").auth.accountPolicy = CONFIG.DATABASE_URL ? (userId) => require("./database").getDatabase().checkAccount(userId) : null;
   const lab = CONFIG.AI_LAB_ENABLED ? require("./lab/telegram").registerLab(bot) : null;
   commands.initCommands(bot);
+  require("./services/auth").registerAuth(bot, (msg) => commands.sendMainMenu(msg.chat.id), (userId) => lab?.revokeUser(userId));
   registerVoiceHandler(bot);
   registerPhotoHandler(bot);
   registerTextHandler(bot, commands, lab);
@@ -209,6 +212,7 @@ function start() {
       await stopTelegramPolling(bot);
       await waitForChatTasks(CHAT_TASKS_GRACE_MS);
       await lab?.close();
+      await accounts.close();
       await stopAccountAssistant();
 
       if (server?.listening) {
@@ -223,7 +227,7 @@ function start() {
     process.exit(exitCode);
   }
 
-  const server = app.listen(CONFIG.PORT, (error) => {
+  const server = app.listen(CONFIG.PORT, CONFIG.HOST, (error) => {
     if (error) {
       logger.error(`Web server could not start on port ${CONFIG.PORT}:`, error);
       shutdown(1, "web server failed");

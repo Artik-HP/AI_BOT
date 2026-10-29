@@ -7,7 +7,8 @@ const {
   enqueueChatTask,
   sendAIResponse
 } = require("../services/telegram");
-const { admitMessage, showTyping } = require("./guard");
+const { admitMessage, showTyping, messageAuthorized } = require("./guard");
+const { withMessageAuth } = require("../services/auth");
 
 const AI_ERROR_MESSAGE = "Не получилось получить ответ от ИИ. Попробуй ещё раз чуть позже.";
 
@@ -51,19 +52,22 @@ function registerTextHandler(bot, commands, lab = null) {
       return;
     }
 
-    await enqueueChatTask(chatId, async () => {
+    await enqueueChatTask(chatId, () => withMessageAuth(msg, async () => {
       try {
+        if (!messageAuthorized(msg)) return;
         await showTyping(bot, chatId);
         const aiReply = await askAI(chatId, aiText, msg.from);
+        if (!messageAuthorized(msg)) return;
         await sendAIResponse(chatId, aiReply, {
           sourceMessageId: msg.message_id,
           ...(isBotMessage ? getBotToBotReplyOptions(msg) : {})
         });
       } catch (error) {
+        if (!messageAuthorized(msg)) return;
         logger.error("AI error:", error);
         await trySendMessage(bot, chatId, AI_ERROR_MESSAGE);
       }
-    });
+    }));
   }));
 }
 

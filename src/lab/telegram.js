@@ -8,6 +8,9 @@ const { admitCallback, admitMessage } = require("../handlers/guard");
 const { claimIncomingMessage, isAddressedToThisBot } = require("../services/telegram");
 const schema = require("./schemas");
 const logger = require("../utils/logger");
+const { AsyncLocalStorage } = require("async_hooks");
+const { auth, runWithLease } = require("../services/auth");
+const { requestLabCompletion } = require("../services/openrouter");
 
 const ERRORS = {
   LAB_BUSY: "Уже выполняется операция. Дождись результата или нажми «Отмена».",
@@ -28,9 +31,22 @@ const BACK = button("← Назад", "home");
 const CANCEL = button("Отмена", "cancel");
 
 class LabTelegram {
-  constructor(bot, service = new LabService()) {
+  constructor(bot, service = null) {
     this.bot = bot;
-    this.service = service;
+    this.activity = new AsyncLocalStorage();
+    this.service = service || new LabService({ complete: async (...args) => {
+      const lease = this.activity.getStore();
+      const check = () => {
+        if (!auth.valid(lease)) {
+          if (lease) this.service.cancel({ chatId: lease.userId, userId: lease.userId });
+          throw new Error("AUTH_REQUIRED");
+        }
+      };
+      check();
+      const reply = await requestLabCompletion(...args);
+      check();
+      return reply;
+    } });
     this.sessions = new Map();
     this.pending = new Set();
   }
@@ -67,11 +83,13 @@ class LabTelegram {
   }
 
   async screen(ctx, text, buttons = []) {
+    if (!auth.valid(this.activity.getStore())) throw new Error("AUTH_REQUIRED");
     const view = id();
-    const actions = buttons.map((item) => ({ ...item, id: id(), view, expires: Date.now() + 86400000 }));
+    const actions = buttons.map((item) => ({ ...item, id: id(), view, authGeneration: this.activity.getStore().generation, expires: Date.now() + 86400000 }));
     const parts = splitMessage(text);
     let sent;
     for (let index = 0; index < parts.length; index += 1) {
+      if (!auth.valid(this.activity.getStore())) throw new Error("AUTH_REQUIRED");
       const options = index === parts.length - 1 ? { reply_markup: { inline_keyboard:
         actions.reduce((rows, item, i) => { if (i % 2 === 0) rows.push([]); rows.at(-1).push({ text: item.label, callback_data: `lab:${item.id}` }); return rows; }, []) } } : {};
       sent = await this.bot.sendMessage(ctx.chatId, parts[index], options);
@@ -104,8 +122,11 @@ class LabTelegram {
   }
 
   async guard(ctx, task) {
-    try { return await task(); }
+    const lease = auth.capture(ctx.userId);
+    return runWithLease(lease, () => this.activity.run(lease, async () => {
+    try { if (!auth.valid(lease)) return; return await task(); }
     catch (error) {
+      if (!auth.valid(lease)) return;
       // Never send/log provider text, arbitrary error messages or payloads.
       logger.warn("Lab action failed", { name: error.name,
         code: /^[A-Z0-9_]{1,40}$/.test(error.code || "") ? error.code : null,
@@ -114,6 +135,7 @@ class LabTelegram {
         (error.status ? `AI-запрос не завершён (HTTP ${error.status}). Повтора не было.` :
           "Не удалось обработать данные. Проверь формат и ограничения. Незавершённый результат не выдан как готовый. /lab — открыть меню."));
     }
+    }));
   }
 
   async progress(ctx) {
@@ -359,6 +381,7 @@ class LabTelegram {
   }
 
   async download(ctx, artifact) {
+    if (!auth.valid(this.activity.getStore())) throw new Error("AUTH_REQUIRED");
     return this.bot.sendDocument(ctx.chatId, Buffer.from(artifact.code), {}, { filename: artifact.filename,
       contentType: artifact.kind === "html" ? "text/html" : "application/javascript" });
   }
@@ -370,7 +393,8 @@ class LabTelegram {
       let action;
       this.service.store.change(ctx, (scope) => {
         action = scope.callbacks.find((cb) => cb.id === query.data.slice(4) && cb.view === scope.view &&
-          cb.messageId === query.message.message_id && cb.expires > Date.now() && !cb.used);
+          cb.messageId === query.message.message_id && cb.expires > Date.now() && !cb.used &&
+          auth.valid({ userId: String(ctx.userId), generation: cb.authGeneration }));
         if (!action) throw new Error("LAB_DUPLICATE");
         action.used = true;
       });
@@ -390,6 +414,15 @@ class LabTelegram {
     // Keep the writer claim until process exit if a request is still in flight. Restart
     // recovers it as unknown. Ordinary chat memory must still get its shutdown flush.
     if (!this.service.active.size) this.service.close();
+  }
+
+  revokeUser(userId) {
+    const ctx = { chatId: userId, userId };
+    this.service.cancel(ctx);
+    this.sessions.delete(`${userId}:${userId}`);
+    if (fs.existsSync(this.service.store.filename)) {
+      this.service.store.change(ctx, (scope) => { scope.callbacks = []; scope.view = null; scope.session = null; });
+    }
   }
 }
 

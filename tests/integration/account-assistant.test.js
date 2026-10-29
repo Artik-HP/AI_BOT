@@ -9,6 +9,7 @@ const { FakeOpenRouter, TEST_OPENROUTER_KEY, failure, reply } = require("../help
 const { createFakeBot } = require("../helpers/fakeBot");
 const { FakeTelegram } = require("../helpers/fakeTelegram");
 const { loadFresh, waitFor } = require("../helpers/freshModules");
+const { TEST_PASSWORD, TEST_PASSWORD_HASH } = require("../helpers/authFixture");
 
 const OWNER = 555;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -17,6 +18,7 @@ const SAFE_DRAFT = { reply: "Привет! Скоро отвечу.", sendable: 
 const SAFE_SENDABLE_DRAFT = { reply: "Привет! Скоро отвечу.", sendable: true, reason: "обычное приветствие" };
 
 const BASE_ENV = {
+  BOT_PASSWORD_HASH: TEST_PASSWORD_HASH,
   ACCOUNT_ASSISTANT_ENABLED: "true",
   ACCOUNT_ASSISTANT_MODE: "approval",
   ACCOUNT_ASSISTANT_OWNER_CHAT_ID: String(OWNER),
@@ -98,6 +100,7 @@ async function boot({ env = {}, chat = () => draftJson(SAFE_DRAFT), clientOption
     ...env
   });
   const bot = createFakeBot();
+  await require("../../src/services/auth").auth.authenticate(OWNER, TEST_PASSWORD);
   const client = createFakeClient(clientOptions);
 
   await assistant.startAccountAssistant(bot, { createClient: () => client, createEventFilter: () => ({ stub: true }), ...startOptions });

@@ -13,7 +13,9 @@
     "telegram:session": "node scripts/create-telegram-session.js",
     "test": "node scripts/run-tests.js",
     "lint": "eslint .",
-    "check": "npm run lint && npm test"
+    "check": "npm run lint && npm test",
+    "db:migrate": "node scripts/database.js migrate",
+    "db:check": "node scripts/database.js check"
   },
   "keywords": [],
   "author": "",
@@ -24,9 +26,11 @@
     "dotenv": "^17.4.2",
     "express": "^5.3.0",
     "node-telegram-bot-api": "^0.67.0",
+    "pg": "^8.23.1",
     "telegram": "^2.26.22"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.13",
     "@eslint/js": "^9.39.5",
     "eslint": "^9.39.5",
     "globals": "^16.5.0"
