@@ -1,6 +1,7 @@
 const axios = require("axios");
 const TelegramBot = require("node-telegram-bot-api");
 const CONFIG = require("../config");
+const { checkContext } = require("./auth");
 const logger = require("../utils/logger");
 const { ApiError, toSafeError } = require("../utils/errors");
 const { createKeyedQueue } = require("../utils/queue");
@@ -313,6 +314,7 @@ function getBotToBotReplyOptions(msg) {
 }
 
 async function sendAIMessage(chatId, reply, options = {}) {
+  checkContext();
   const cleanReply = dedupeRepeatedReply(reply);
 
   if (!cleanReply) {
@@ -332,6 +334,7 @@ async function sendCleanTextMessage(chatId, cleanReply, options = {}) {
   const parts = limitReplyParts(splitMessage(prefixBotMention(cleanReply, options.targetUsername)));
 
   for (const [index, part] of parts.entries()) {
+    checkContext();
     await getTelegramBot().sendMessage(chatId, part, index === 0 ? buildSendMessageOptions(options) : {});
   }
 }
@@ -361,10 +364,12 @@ function isFileTooLargeError(error) {
 
 // The download URL contains the bot token, so errors are converted before they leave this function.
 async function downloadTelegramFile(fileId, options) {
+  checkContext();
   const { maxBytes, fileLabel } = getDownloadOptions(options);
 
   try {
     const fileLink = await getTelegramBot().getFileLink(fileId);
+    checkContext();
     const response = await axios.get(fileLink, {
       responseType: "arraybuffer",
       timeout: 60000,
@@ -372,6 +377,7 @@ async function downloadTelegramFile(fileId, options) {
       maxBodyLength: maxBytes
     });
     const fileBuffer = Buffer.from(response.data);
+    checkContext();
 
     if (fileBuffer.length > maxBytes) {
       throw new ApiError(`${fileLabel} file is too large: ${fileBuffer.length} bytes`, { code: FILE_TOO_LARGE });

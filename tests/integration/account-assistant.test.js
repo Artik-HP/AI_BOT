@@ -707,3 +707,34 @@ test("остановка: сообщение, ожидавшее своего о
     await t.close();
   }
 });
+
+test("account auth: stale drafts cannot redraft, block or send after owner re-login", async () => {
+  const t = await boot();
+  try {
+    await t.handle(incoming({ chatId: 9923, username: "stale_peer", text: "старый черновик" }));
+    const draftId = t.lastDraftId();
+    const count = t.or.chatRequests().length;
+    const auth = require("../../src/services/auth").auth;
+    auth.logout(OWNER); await auth.authenticate(OWNER, TEST_PASSWORD);
+    for (const action of ["redraft", "block", "send", "drop"]) await t.bot.callback(OWNER, `account:${action}:${draftId}`);
+    await t.bot.text(OWNER, `/account_redraft ${draftId}`);
+    assert.equal(t.or.chatRequests().length, count);
+    assert.equal(t.client.sent.length, 0);
+    assert.equal(t.assistant.getAccountAssistantStatus().blockListSize, 0);
+  } finally { await t.close(); }
+});
+
+test("account auth: re-login cannot renew old text waiting in a throttle burst", async () => {
+  const t = await boot({ env: { ACCOUNT_ASSISTANT_MIN_INTERVAL_MS: "600" } });
+  try {
+    await t.handle(incoming({ chatId: 9924, username: "burst_peer", text: "initial" }));
+    await t.handle(incoming({ chatId: 9924, username: "burst_peer", text: "OLD_REVOKED_TEXT" }));
+    const auth = require("../../src/services/auth").auth;
+    auth.logout(OWNER); await auth.authenticate(OWNER, TEST_PASSWORD);
+    await t.handle(incoming({ chatId: 9924, username: "burst_peer", text: "NEW_AUTHORIZED_TEXT" }));
+    await waitFor(() => t.or.chatRequests().length === 2, 3000);
+    const payload = JSON.stringify(t.or.chatRequests()[1].body);
+    assert.ok(payload.includes("NEW_AUTHORIZED_TEXT"));
+    assert.ok(!payload.includes("OLD_REVOKED_TEXT"));
+  } finally { await t.close(); }
+});

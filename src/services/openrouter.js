@@ -185,6 +185,7 @@ function rememberExchange(chatId, userContent, aiReply) {
 }
 
 async function askAI(chatId, text, from) {
+  checkContext();
   const memory = updatePersonalityMemory(chatId, text, from);
   const history = memory.messages.slice(-MAX_HISTORY_MESSAGES);
 
@@ -228,6 +229,7 @@ function buildImageTurnMessage(text, imageDataUrl) {
 }
 
 async function askAIWithImage(chatId, text, image, from) {
+  checkContext();
   const promptText = text?.trim() || "Describe this image and answer based on it.";
   const memoryText = text?.trim()
     ? `[Image attached]\nCaption/request: ${text.trim()}`

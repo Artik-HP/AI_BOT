@@ -47,7 +47,7 @@ class PasswordAuth {
     const key = String(userId);
     this.sessions.delete(key);
     this.challenges.delete(key);
-    if (this.epochs.size < 10000 || this.epochs.has(key)) this.epochs.set(key, (this.epochs.get(key) || 0) + 1);
+    if (this.pending.has(key)) this.epochs.set(key, null);
   }
   challenge(userId) {
     if (!this.validId(userId)) return;
@@ -56,8 +56,10 @@ class PasswordAuth {
   }
   awaiting(userId) { return (this.challenges.get(String(userId)) || 0) > this.now(); }
   isCredentialText(text) {
-    if (typeof text !== "string" || text.length > 256) return false;
-    const tag = this.tag(text.trim());
+    if (typeof text !== "string") return false;
+    const normalized = text.trim();
+    if (normalized.length > 256) return false;
+    const tag = this.tag(normalized);
     return [...this.sessions.values()].some((session) => session.credentialTag === tag);
   }
   prune() {
@@ -75,11 +77,12 @@ class PasswordAuth {
     if ((this.failures.get(key)?.count || 0) >= this.maxFailures || this.globalFailures.length >= 50) return { ok: false, reason: "locked" };
     if (this.pending.has(key) || this.pending.size >= 2 || this.sessions.size >= 10000) return { ok: false, reason: "busy" };
     this.pending.add(key);
-    const epoch = this.epochs.get(key) || 0;
+    const epoch = crypto.randomBytes(16).toString("hex");
+    this.epochs.set(key, epoch);
     try {
       const [, , , , salt, expected] = this.hash.split("$");
       const value = await scrypt(password, salt, 32, { N: 16384, r: 8, p: 1 });
-      if (epoch !== (this.epochs.get(key) || 0)) return { ok: false, reason: "revoked" };
+      if (epoch !== this.epochs.get(key)) return { ok: false, reason: "revoked" };
       if (!crypto.timingSafeEqual(value, Buffer.from(expected, "hex"))) {
         const failure = this.failures.get(key) || { count: 0, until: this.now() + this.lockMs };
         failure.count++;
@@ -94,12 +97,12 @@ class PasswordAuth {
         if (!account.allowed) return { ok: false, reason: "blocked" };
         if (account.until) deadline = Math.min(deadline, new Date(account.until).getTime());
       }
-      if (epoch !== (this.epochs.get(key) || 0)) return { ok: false, reason: "revoked" };
+      if (epoch !== this.epochs.get(key)) return { ok: false, reason: "revoked" };
       this.sessions.set(key, { generation: crypto.randomBytes(16).toString("hex"), expires: deadline, credentialTag: this.tag(password) });
       this.failures.delete(key);
       this.challenges.delete(key);
       return { ok: true };
-    } finally { this.pending.delete(key); }
+    } finally { this.pending.delete(key); this.epochs.delete(key); }
   }
 }
 

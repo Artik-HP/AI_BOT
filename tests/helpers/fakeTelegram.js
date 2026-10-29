@@ -203,7 +203,8 @@ class FakeTelegram {
     }
 
     const method = match[2];
-    this.calls.push({ method, params: method === "getUpdates" ? { offset: params.offset } : params, at: Date.now() });
+    const call = { method, params: method === "getUpdates" ? { offset: params.offset } : params, at: Date.now() };
+    this.calls.push(call);
 
     const send = (body, status = 200) => {
       res.statusCode = status;
@@ -249,10 +250,11 @@ class FakeTelegram {
         return;
       }
       case "sendMessage":
+        call.messageId = ++this.msgSeq;
         send({
           ok: true,
           result: {
-            message_id: ++this.msgSeq,
+            message_id: call.messageId,
             from: { id: this.botId, is_bot: true, username: this.botUsername },
             chat: { id: Number(params.chat_id) || params.chat_id, type: "private" },
             date: Math.floor(Date.now() / 1000),

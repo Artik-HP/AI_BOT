@@ -42,13 +42,13 @@ function registerTextHandler(bot, commands, lab = null) {
     if (!isBotMessage && lab && (text === commands.BUTTONS.lab || lab.hasSession(msg))) {
       if (text === commands.BUTTONS.lab) await lab.open(msg);
       else if (!Object.values(commands.BUTTONS).includes(text)) await lab.handleText(msg);
-      else { lab.exit(msg); await commands.handleMenuButton(chatId, text); }
+      else { lab.exit(msg); await commands.handleMenuButton(chatId, text, msg.from.id); }
       return;
     }
 
     logger.message("in", { chatId, userId: msg.from?.id, username: msg.from?.username }, text);
 
-    if (!isBotMessage && text && await commands.handleMenuButton(chatId, text)) {
+    if (!isBotMessage && text && await commands.handleMenuButton(chatId, text, msg.from.id)) {
       return;
     }
 

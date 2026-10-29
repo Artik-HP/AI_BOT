@@ -64,7 +64,9 @@ test("все команды владельца, кнопки и inline-меню 
     }
 
     for (const [action, pattern] of [["help", /^Команды:/], ["voice", /^Голосовые:/], ["status", /^Статус:/], ["reset", /Память этого чата очищена/], ["main", /Панель управления/]]) {
-      const replies = await ask(tg, () => tg.callback({ chatId: OWNER, data: `menu:${action}` }));
+      const call = tg.calls.filter((item) => item.method === "sendMessage" && item.params.reply_markup && JSON.parse(item.params.reply_markup).inline_keyboard).at(-1);
+      const button = JSON.parse(call.params.reply_markup).inline_keyboard.flat().find((item) => item.callback_data.endsWith(`:${action}`));
+      const replies = await ask(tg, () => tg.callback({ chatId: OWNER, data: button.callback_data, messageId: call.messageId }));
 
       assert.match(replies[0].text, pattern, `menu:${action}`);
     }

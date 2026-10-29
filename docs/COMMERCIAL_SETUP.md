@@ -56,6 +56,6 @@ npm audit --omit=dev
 git diff --check
 ```
 
-Runtime-файлы: `index.js`, `src/**`, `migrations/**`, `scripts/database.js`, действующие scripts userbot/session при необходимости, `package.json`, `package-lock.json`. Документацию можно включить отдельно. Исключите `.env`/`.env.*`, Telegram-сессии, реальные memory/lab JSON, Windows node_modules, `.local`, архивные artifacts, tests, test-results и devDependencies. Постоянные данные хранятся вне релиза; `MEMORY_FILE` и `AI_LAB_FILE` указывают на shared/data.
+Runtime-файлы: `index.js`, `src/**`, `migrations/**`, `scripts/database.js`, `scripts/bot-password.js`, действующие scripts userbot/session при необходимости, `package.json`, `package-lock.json`. Документацию можно включить отдельно. Исключите `.env`/`.env.*`, Telegram-сессии, реальные memory/lab JSON, Windows node_modules, `.local`, архивные artifacts, tests, test-results и devDependencies. Постоянные данные хранятся вне релиза; `MEMORY_FILE` и `AI_LAB_FILE` указывают на shared/data.
 
 Telegram/OpenRouter проверяются локальными HTTP-фейками. PGlite проверяет PostgreSQL-семантику SQL на изолированном WASM-движке; это не проверка TCP, SCRAM, TLS или роли VPS. Эти live-проверки выполняются в процессе развёртывания.

@@ -6,7 +6,7 @@ const { createTtlSet } = require("../utils/ttlSet");
 const { TELEGRAM_MESSAGE_LIMIT } = require("../utils/text");
 const { draftAccountReply } = require("./openrouter");
 const { isAddressedToThisBot } = require("./telegram");
-const { auth } = require("./auth");
+const { auth, runWithLease, withMessageAuth, checkContext } = require("./auth");
 const { admitMessage, admitCallback } = require("../handlers/guard");
 
 const { parseBoolean } = CONFIG;
@@ -408,6 +408,7 @@ async function editOwnerNotice(draft, text) {
 }
 
 async function notifyOwner(chatId, text) {
+  try { checkContext(); } catch { return; }
   if (!controlBot || !chatId || !auth.authenticated(chatId)) {
     return;
   }
@@ -470,6 +471,12 @@ function createBusyError() {
 }
 
 // Only one caller at a time may send a draft: a double tap must not message the contact twice.
+function getActiveDraft(id) {
+  const draft = pendingDrafts.get(id);
+  if (draft && !auth.valid(draft.authLease)) { pendingDrafts.delete(id); return null; }
+  return draft;
+}
+
 function claimDraft(id) {
   const draft = pendingDrafts.get(id);
 
@@ -545,6 +552,8 @@ function flushBurst(key) {
 
   pendingBursts.delete(key);
 
+  if (burst) burst.items = burst.items.filter((entry) => auth.valid(entry.authLease));
+
   if (!burst?.items.length) {
     return;
   }
@@ -558,7 +567,7 @@ function flushBurst(key) {
 
 function dispatchEntry(entry) {
   markHandled(entry.chatId);
-  return enqueueChatTask(entry.chatId, () => processEntry(entry));
+  return enqueueChatTask(entry.chatId, () => runWithLease(entry.authLease, () => processEntry(entry)));
 }
 
 async function processEntry({ message, incomingText, profile, chatId, authLease }) {
@@ -681,6 +690,10 @@ function describeSender(draft) {
 }
 
 async function handleAccountCallback(query) {
+  return runWithLease(auth.capture(query.from?.id), () => handleAuthenticatedAccountCallback(query));
+}
+
+async function handleAuthenticatedAccountCallback(query) {
   const data = query.data || "";
 
   if (!data.startsWith("account:")) {
@@ -694,7 +707,7 @@ async function handleAccountCallback(query) {
   if (!await admitCallback(controlBot, query)) return;
 
   const [, action, id] = data.split(":");
-  const draft = pendingDrafts.get(id);
+  const draft = getActiveDraft(id);
 
   try {
     if (!draft) {
@@ -796,7 +809,7 @@ async function sendPendingList(chatId) {
 }
 
 async function redraftPendingDraft(id) {
-  const draft = pendingDrafts.get(id);
+  const draft = getActiveDraft(id);
 
   if (!draft) {
     throw new Error("Draft not found or expired");
@@ -886,6 +899,13 @@ async function enableAccountAssistant(chatId) {
   if (!accountClient) {
     await connectAccountAssistant();
   }
+  try { checkContext(); }
+  catch (error) {
+    desiredEnabled = false;
+    accountAssistantEnabled = false;
+    await disconnectClient();
+    throw error;
+  }
 
   if (generation !== lifecycleGeneration) {
     if (!desiredEnabled) {
@@ -946,7 +966,7 @@ function registerControlBotHandlers(bot) {
       }
       if (!await admitMessage(bot, msg)) return;
 
-      await handler(msg, match);
+      await withMessageAuth(msg, () => handler(msg, match));
     }));
   }
 
@@ -1079,7 +1099,7 @@ function registerControlBotHandlers(bot) {
 
   ownerCommand(/^\/account_drop(?:@\w+)?\s+([a-z0-9]+)\s*$/i, async (msg, match) => {
     const id = match[1];
-    const draft = pendingDrafts.get(id);
+    const draft = getActiveDraft(id);
 
     if (draft?.sending) {
       await controlBot.sendMessage(msg.chat.id, "Черновик уже отправляется.");

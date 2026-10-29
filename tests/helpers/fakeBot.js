@@ -40,12 +40,12 @@ function createFakeBot() {
 
       return false;
     },
-    async callback(chatId, data, fromId = chatId) {
+    async callback(chatId, data, fromId = chatId, messageId = 1) {
       await Promise.all(callbackHandlers.map((callback) => callback({
         id: `q${Math.random()}`,
         data,
         from: { id: fromId },
-        message: { chat: { id: chatId, type: "private" }, message_id: 1 }
+        message: { chat: { id: chatId, type: "private" }, message_id: messageId }
       })));
     },
     lastText() {

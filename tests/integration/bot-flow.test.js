@@ -152,7 +152,12 @@ test("память пишется на диск отложенно и содер
     or.chat = () => reply("сохрани меня");
     tg.message({ chatId: 4011, text: "запомни это" });
     await tg.waitFor(() => tg.texts().length >= 1, 8000, "ответ");
-    await waitFor(() => fs.existsSync(app.memoryFile), 4000, "memory.json");
+    // Authentication may create the file before the debounced dialogue save finishes.
+    await waitFor(() => {
+      if (!fs.existsSync(app.memoryFile)) return false;
+      const memory = JSON.parse(fs.readFileSync(app.memoryFile, "utf8"));
+      return memory["4011"]?.messages?.length === 2;
+    }, 4000, "сохранённый диалог в memory.json");
 
     const stored = JSON.parse(fs.readFileSync(app.memoryFile, "utf8"));
 

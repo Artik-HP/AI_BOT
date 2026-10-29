@@ -1,4 +1,6 @@
 const CONFIG = require("./config");
+const crypto = require("crypto");
+const { auth, withMessageAuth } = require("./services/auth");
 const logger = require("./utils/logger");
 const { safeHandler } = require("./utils/safe");
 const { getSttModels } = require("./services/openrouter");
@@ -17,6 +19,17 @@ const { isOwner } = require("./services/access");
 const { admitCallback, admitMessage } = require("./handlers/guard");
 
 let bot;
+const menuSessions = new Map();
+
+function boundInlineMenu(chatId, userId, messageId = null) {
+  for (const [key, item] of menuSessions) if (!auth.valid(item.lease)) menuSessions.delete(key);
+  if (menuSessions.size >= 1000) menuSessions.delete(menuSessions.keys().next().value);
+  const token = crypto.randomBytes(12).toString("hex");
+  const entry = { chatId: String(chatId), userId: String(userId), lease: auth.capture(userId), messageId };
+  menuSessions.set(token, entry);
+  return { entry, options: { reply_markup: { inline_keyboard: INLINE_MENU.reply_markup.inline_keyboard.map((row) => row.map((button) =>
+    ({ ...button, callback_data: `menu:${token}:${button.callback_data.slice(5)}` }))) } } };
+}
 
 function onUserText(regexp, callback) {
   bot.onText(regexp, safeHandler(`Command ${regexp.source.slice(0, 24)}`, async (msg, match) => {
@@ -28,7 +41,7 @@ function onUserText(regexp, callback) {
       return;
     }
 
-    await callback(msg, match);
+    await withMessageAuth(msg, () => callback(msg, match));
   }));
 }
 
@@ -137,7 +150,7 @@ function initCommands(telegramBot) {
 
   onUserText(/^\/start(?:@\w+)?(?:\s|$)/, async (msg) => {
     const chatId = msg.chat.id;
-    return sendMainMenu(chatId);
+    return sendMainMenu(chatId, msg.from.id);
   });
 
   onUserText(/^\/help(?:@\w+)?(?:\s|$)/, async (msg) => {
@@ -151,7 +164,7 @@ function initCommands(telegramBot) {
   });
 
   onUserText(/^\/menu(?:@\w+)?(?:\s|$)/, async (msg) => {
-    await sendMainMenu(msg.chat.id);
+    await sendMainMenu(msg.chat.id, msg.from.id);
   });
 
   onUserText(/^\/voice(?:@\w+)?(?:\s|$)/, async (msg) => {
@@ -163,11 +176,11 @@ function initCommands(telegramBot) {
   });
 
   onUserText(/^\/bot_status(?:@\w+)?(?:\s|$)/, async (msg) => {
-    await sendBotToBotStatus(msg.chat.id);
+    await sendBotToBotStatus(msg.chat.id, msg.from.id);
   });
 
   onUserText(/^\/bot_send(?:@\w+)?(?:\s|$)/, async (msg) => {
-    await sendBotMessageFromCommand(msg.chat.id, msg.text);
+    await sendBotMessageFromCommand(msg.chat.id, msg.text, msg.from.id);
   });
 
   bot.on("callback_query", safeHandler("Menu callback", async (query) => {
@@ -183,9 +196,16 @@ function initCommands(telegramBot) {
       return;
     }
 
+    const [, token, action] = data.split(":");
+    const entry = menuSessions.get(token);
+    if (!entry || !auth.valid(entry.lease) || entry.userId !== String(query.from.id) || entry.chatId !== String(chatId) || entry.messageId !== messageId) {
+      await bot.answerCallbackQuery(query.id, { text: "Кнопка истекла. Открой /menu заново." }).catch(() => {});
+      return;
+    }
+
     try {
       await bot.answerCallbackQuery(query.id);
-      await handleInlineMenu(chatId, messageId, data.slice("menu:".length));
+      await handleInlineMenu(chatId, messageId, action, query.from.id);
     } catch (error) {
       logger.error("Inline menu error:", error);
       await bot.answerCallbackQuery(query.id, {
@@ -196,7 +216,7 @@ function initCommands(telegramBot) {
   }));
 }
 
-async function sendMainMenu(chatId) {
+async function sendMainMenu(chatId, userId = chatId) {
   await bot.sendMessage(
     chatId,
     [
@@ -208,7 +228,9 @@ async function sendMainMenu(chatId) {
     MAIN_KEYBOARD
   );
 
-  await bot.sendMessage(chatId, "Панель управления:", INLINE_MENU);
+  const menu = boundInlineMenu(chatId, userId);
+  const sent = await bot.sendMessage(chatId, "Панель управления:", menu.options);
+  menu.entry.messageId = sent.message_id;
 }
 
 async function sendHelp(chatId) {
@@ -277,20 +299,22 @@ async function sendStatus(chatId) {
   await bot.sendMessage(chatId, lines.join("\n"), MAIN_KEYBOARD);
 }
 
-function isBotToBotOwner(chatId) {
+function isBotToBotOwner(chatId, userId) {
   return (
     CONFIG.BOT_TO_BOT_OWNER_CHAT_ID &&
-    String(chatId) === String(CONFIG.BOT_TO_BOT_OWNER_CHAT_ID)
+    /^\d+$/.test(String(chatId)) &&
+    String(chatId) === String(CONFIG.BOT_TO_BOT_OWNER_CHAT_ID) &&
+    String(userId) === String(CONFIG.BOT_TO_BOT_OWNER_CHAT_ID)
   );
 }
 
-async function ensureBotToBotOwner(chatId) {
+async function ensureBotToBotOwner(chatId, userId) {
   if (!CONFIG.BOT_TO_BOT_OWNER_CHAT_ID) {
     await bot.sendMessage(chatId, "Укажи BOT_TO_BOT_OWNER_CHAT_ID в переменных окружения.");
     return false;
   }
 
-  if (!isBotToBotOwner(chatId)) {
+  if (!isBotToBotOwner(chatId, userId)) {
     await bot.sendMessage(chatId, "Эта команда доступна только владельцу бота.");
     return false;
   }
@@ -298,8 +322,8 @@ async function ensureBotToBotOwner(chatId) {
   return true;
 }
 
-async function sendBotToBotStatus(chatId) {
-  if (!await ensureBotToBotOwner(chatId)) {
+async function sendBotToBotStatus(chatId, userId = chatId) {
+  if (!await ensureBotToBotOwner(chatId, userId)) {
     return;
   }
 
@@ -342,8 +366,8 @@ function parseBotSendArguments(text, status) {
   return { username: status.targetBotUsername, message: args };
 }
 
-async function sendBotMessageFromCommand(chatId, text) {
-  if (!await ensureBotToBotOwner(chatId)) {
+async function sendBotMessageFromCommand(chatId, text, userId = chatId) {
+  if (!await ensureBotToBotOwner(chatId, userId)) {
     return;
   }
 
@@ -373,9 +397,9 @@ async function resetChatMemory(chatId) {
   await bot.sendMessage(chatId, "Память этого чата очищена.", MAIN_KEYBOARD);
 }
 
-async function handleMenuButton(chatId, text) {
+async function handleMenuButton(chatId, text, userId = chatId) {
   if (text === BUTTONS.menu) {
-    await sendMainMenu(chatId);
+    await sendMainMenu(chatId, userId);
     return true;
   }
 
@@ -402,12 +426,13 @@ async function handleMenuButton(chatId, text) {
   return false;
 }
 
-async function handleInlineMenu(chatId, messageId, action) {
+async function handleInlineMenu(chatId, messageId, action, userId = chatId) {
   if (action === "main") {
+    const menu = boundInlineMenu(chatId, userId, messageId);
     await bot.editMessageText("Панель управления:", {
       chat_id: chatId,
       message_id: messageId,
-      ...INLINE_MENU
+      ...menu.options
     });
     return;
   }

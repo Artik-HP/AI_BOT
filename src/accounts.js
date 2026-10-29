@@ -7,11 +7,11 @@ const { admitMessage, admitCallback, messageAuthorized } = require("./handlers/g
 const { isAddressedToThisBot } = require("./services/telegram");
 const { safeHandler } = require("./utils/safe");
 
-function registerAccounts(bot) {
+function registerAccounts(bot, database = getDatabase) {
   const confirmations = new Map();
   async function run(chatId, task) {
     try {
-      const db = getDatabase();
+      const db = database();
       if (!db) { await bot.sendMessage(chatId, "PostgreSQL ещё не подключена. Учёт пользователей появится после настройки базы."); return; }
       await task(db);
     } catch { await bot.sendMessage(chatId, "Учёт пользователей недоступен. Администратору нужно проверить подключение и миграции PostgreSQL."); }
@@ -65,7 +65,7 @@ function registerAccounts(bot) {
       if (auth.valid(item.lease)) await bot.sendMessage(query.message.chat.id, "Доступ обновлён. Старая сессия пользователя закрыта; следующий вход проверит новый статус.");
     });
   }));
-  return { close: async () => { if (CONFIG.DATABASE_URL) await getDatabase()?.close(); } };
+  return { close: async () => { if (CONFIG.DATABASE_URL) await database()?.close(); } };
 }
 
 module.exports = { registerAccounts };

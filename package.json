@@ -11,6 +11,8 @@
     "start": "node index.js",
     "userbot": "node scripts/userbot.js",
     "telegram:session": "node scripts/create-telegram-session.js",
+    "password:check": "node scripts/bot-password.js --check",
+    "password:set": "node scripts/bot-password.js --set",
     "test": "node scripts/run-tests.js",
     "lint": "eslint .",
     "check": "npm run lint && npm test",
