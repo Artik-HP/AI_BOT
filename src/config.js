@@ -200,6 +200,14 @@ function buildConfig(env = process.env, warn = logger.warn) {
     DUPLICATE_REPLY_TTL_MS: 15 * 1000,
     MAX_REPLY_PARTS: readNumber(env, "MAX_REPLY_PARTS", 6, warn, { min: 1, integer: true }),
 
+    AI_LAB_ENABLED: readBoolean(env, "AI_LAB_ENABLED", true, warn),
+    AI_LAB_FILE: path.resolve(clean(env, "AI_LAB_FILE") || `${env.MEMORY_FILE || path.join(__dirname, "..", "memory.json")}.lab.json`),
+    AI_LAB_MODEL: readString(env, "AI_LAB_MODEL", "", warn),
+    AI_LAB_MAX_TOKENS: readNumber(env, "AI_LAB_MAX_TOKENS", 4000, warn, { min: 64, max: 16000, integer: true }),
+    AI_LAB_TIMEOUT_MS: readNumber(env, "AI_LAB_TIMEOUT_MS", 60000, warn, { min: 100, max: 120000, integer: true }),
+    AI_LAB_DAILY_REQUESTS: readNumber(env, "AI_LAB_DAILY_REQUESTS", 30, warn, { min: 2, max: 200, integer: true }),
+    AI_LAB_MAX_BYTES: readBytes(env, "AI_LAB_MAX_BYTES", 10 * 1024 * 1024, warn),
+
     OWNER_CHAT_IDS: [...new Set(Object.values(owner).filter(Boolean))],
     BOT_ALLOWED_USER_IDS: readIdList(env, "BOT_ALLOWED_USER_IDS", warn),
     RATE_LIMIT_MESSAGES: readNumber(env, "RATE_LIMIT_MESSAGES", 20, warn, { min: 1, integer: true }),

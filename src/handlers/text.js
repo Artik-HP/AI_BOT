@@ -19,7 +19,7 @@ function getAIText(text, isBotMessage) {
   return text.match(/^\/bot_chat(?:@\w+)?\s+([\s\S]+)$/i)?.[1]?.trim();
 }
 
-function registerTextHandler(bot, commands) {
+function registerTextHandler(bot, commands, lab = null) {
   bot.on("message", safeHandler("Text message handler", async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text?.trim();
@@ -35,6 +35,13 @@ function registerTextHandler(bot, commands) {
     }
 
     if (!await admitMessage(bot, msg)) {
+      return;
+    }
+
+    if (!isBotMessage && lab && (text === commands.BUTTONS.lab || lab.hasSession(msg))) {
+      if (text === commands.BUTTONS.lab) await lab.open(msg);
+      else if (!Object.values(commands.BUTTONS).includes(text)) await lab.handleText(msg);
+      else { lab.exit(msg); await commands.handleMenuButton(chatId, text); }
       return;
     }
 

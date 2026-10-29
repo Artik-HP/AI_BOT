@@ -133,7 +133,7 @@ test("SIGTERM: код 143, память сброшена на диск, опро
     assert.equal(fs.existsSync(app.memoryFile), false, "дебаунс ещё не сработал");
 
     const started = Date.now();
-    app.child.kill("SIGTERM");
+    app.terminate();
     const exit = await app.waitForExit(10000);
 
     assert.ok(exit, "процесс не завершился");
@@ -155,7 +155,7 @@ test("SIGTERM во время обработки: ответ ещё успева
     or.chat = () => ({ ...reply("успел ответить"), delayMs: 600 });
     tg.message({ chatId: 5011, text: "долгий вопрос" });
     await tg.waitFor(() => or.chatRequests().length >= 1, 8000, "запрос ушёл");
-    app.child.kill("SIGTERM");
+    app.terminate();
     await app.waitForExit(10000);
 
     assert.deepEqual(tg.texts(), ["успел ответить"]);

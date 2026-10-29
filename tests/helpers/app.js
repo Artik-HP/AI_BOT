@@ -51,8 +51,9 @@ async function launchApp({ tg, or, env = {}, entry = "index.js", legacy = proces
     }
   }
 
-  const args = [...(legacy ? ["--require", LEGACY_SHIM] : []), entry];
-  const child = spawn(process.execPath, args, { cwd: ROOT, env: mergedEnv, stdio: ["ignore", "pipe", "pipe"] });
+  const args = ["--require", path.join(__dirname, "signalBridge.js"), ...(legacy ? ["--require", LEGACY_SHIM] : []), path.resolve(ROOT, entry)];
+  // dotenv must not load the developer's real .env (models, sessions and enabled integrations).
+  const child = spawn(process.execPath, args, { cwd: tmp, env: mergedEnv, stdio: ["ignore", "pipe", "pipe", "ipc"] });
   const chunks = [];
   let exited = null;
   const exitPromise = new Promise((resolve) => {
@@ -73,6 +74,11 @@ async function launchApp({ tg, or, env = {}, entry = "index.js", legacy = proces
     output: () => chunks.join(""),
     exited: () => exited,
     exitPromise,
+    terminate() {
+      // Windows kill(SIGTERM) is forceful and cannot test JS cleanup. Exercise the same handler via IPC.
+      if (process.platform === "win32") child.send({ type: "test-sigterm" });
+      else child.kill("SIGTERM");
+    },
     async waitForOutput(pattern, timeoutMs = 8000) {
       const started = Date.now();
 
@@ -117,7 +123,7 @@ async function waitReady(tg, app, timeoutMs = 10000) {
   // a port lost to a parallel test is noticed here and not as a mysterious failure in the middle of the test body.
   await app.waitForOutput(/Web server (started|could not start)/, 5000);
 
-  if (app.exited()) {
+  if (app.exited() || /Web server could not start/.test(app.output())) {
     throw new Error(`app exited early: ${JSON.stringify(app.exited())}\n${app.output()}`);
   }
 }
@@ -130,13 +136,13 @@ async function withApp(options, fn) {
   // Lets a test arrange the fakes (for example a failing getMe) before the bot process starts.
   options.setup?.({ tg, or });
 
-  let app = null;
+  let app;
 
   try {
     // freePort() frees the port before the bot binds it, and tests run in parallel processes: now and then another
     // process grabs that very port in between. That is a property of the harness, not of the bot, so start again.
     for (let attempt = 1; ; attempt += 1) {
-      app = await launchApp({ tg, or, env: options.env, legacy: options.legacy });
+      app = await (options.launch || launchApp)({ tg, or, env: options.env, legacy: options.legacy });
 
       try {
         await waitReady(tg, app);
@@ -147,7 +153,6 @@ async function withApp(options, fn) {
         await app.stop().catch(() => {});
 
         if (!portTaken || attempt >= MAX_LAUNCH_ATTEMPTS) {
-          app = null;
           throw error;
         }
       }

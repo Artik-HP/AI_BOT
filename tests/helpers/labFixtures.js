@@ -1,0 +1,12 @@
+const htmlCode = '<!doctype html><html lang="ru"><meta charset="utf-8"><title>Цена</title><form id="calc"><label>Себестоимость<input id="cost" type="number"></label><label>Наценка %<input id="margin" type="number"></label><button>Рассчитать</button><button type="reset">Сброс</button><output id="result"></output></form><script>const f=document.getElementById("calc");const out=document.getElementById("result");f.onsubmit=e=>{e.preventDefault();const c=Number(f.elements.cost.value);const m=Number(f.elements.margin.value);out.textContent=f.elements.cost.value!==""&&f.elements.margin.value!==""&&Number.isFinite(c)&&Number.isFinite(m)&&c>=0&&m>=0?String(c*(1+m/100)):"Ошибка ввода";};f.onreset=()=>{out.textContent="";};</script></html>';
+const nodeCode = 'const c=Number(process.argv[2]);const m=Number(process.argv[3]);if(process.argv.length!==4||!Number.isFinite(c)||!Number.isFinite(m)||c<0||m<0){process.stderr.write("Ошибка ввода");process.exitCode=1;}else{process.stdout.write(String(c*(1+m/100)));}';
+const idea = { title: "Калькулятор цены", problem: "Рассчитать цену по себестоимости", audience: "Владелец магазина", input: "100 и 20%", output: "120",
+  mvp: ["Ввод", "Расчёт", "Сброс"], stack: "HTML/JavaScript", effort: "2–4 часа при знании основ", validation: "Проверить 100 и 20%", limitations: "Без налогов", monetization: "Гипотеза: настройка для магазина" };
+const ideas = { ideas: [idea, { ...idea, title: "Шаблон ответа" }, { ...idea, title: "Таймер" }] };
+const plan = { input: "100,20", processing: "base*(1+margin/100)", output: "120", tasks: ["Сделать форму"], acceptance: ["100+20%=120"], demo: "Ввести 100,20" };
+const artifact = (kind = "html") => ({ kind, code: kind === "html" ? htmlCode : nodeCode,
+  instructions: kind === "html" ? "Открой HTML-файл в браузере." : "PowerShell: node .\\tool.js 100 20",
+  examples: [{ input: "100,20", output: "120" }, { input: "50,0", output: "50" }], validation: "Требуется проверка на своих данных." });
+const completion = (value) => ({ text: typeof value === "string" ? value : JSON.stringify(value), model: "fake-lab", finishReason: "stop", usage: {}, elapsedMs: 1 });
+const response = (value) => ({ status: 200, body: { model: "fake-lab", choices: [{ finish_reason: "stop", message: { content: typeof value === "string" ? value : JSON.stringify(value) } }], usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 } } });
+module.exports = { htmlCode, nodeCode, idea, ideas, plan, artifact, completion, response };

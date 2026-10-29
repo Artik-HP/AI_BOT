@@ -182,6 +182,16 @@ class FakeTelegram {
       for (const [key, value] of new URLSearchParams(raw)) {
         params[key] = value;
       }
+    } else if (contentType.includes("multipart/form-data")) {
+      const boundary = contentType.match(/boundary=([^;]+)/)?.[1];
+      for (const part of raw.split(`--${boundary}`)) {
+        const split = part.indexOf("\r\n\r\n");
+        if (split < 0) continue;
+        const header = part.slice(0, split);
+        const name = header.match(/name="([^"]+)"/)?.[1];
+        const filename = header.match(/filename="([^"]+)"/)?.[1];
+        if (name) params[name] = filename ? { filename, content: part.slice(split + 4, -2) } : part.slice(split + 4, -2);
+      }
     }
 
     const method = match[2];
@@ -207,6 +217,8 @@ class FakeTelegram {
         return;
       case "getUpdates": {
         const offset = Number(params.offset || 0);
+        // Telegram forgets updates acknowledged by advancing the offset, including after restart.
+        this.queue = this.queue.filter((update) => update.update_id >= offset);
         const pick = () => this.queue.filter((update) => update.update_id >= offset);
 
         if (pick().length) {

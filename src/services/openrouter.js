@@ -59,13 +59,13 @@ function assertNoProviderError(data) {
 }
 
 // Every failure leaves this function as an ApiError without the request (and its Authorization header).
-async function postJson(pathname, body, { timeout = REQUEST_TIMEOUT_MS, retries = 0 } = {}) {
+async function postJson(pathname, body, { timeout = REQUEST_TIMEOUT_MS, retries = 0, maxBytes = Infinity } = {}) {
   for (let attempt = 0; ; attempt += 1) {
     try {
       const response = await axios.post(`${CONFIG.OPENROUTER_BASE_URL}${pathname}`, body, {
         headers: buildHeaders(),
         timeout,
-        maxContentLength: Infinity,
+        maxContentLength: maxBytes,
         maxBodyLength: Infinity
       });
 
@@ -112,6 +112,35 @@ async function requestAICompletion(messages, options = {}) {
   });
 
   return dedupeRepeatedReply(extractMessageText(data?.choices?.[0]?.message?.content));
+}
+
+// Laboratory calls intentionally have no retries, repeat guard or ordinary chat history.
+// The existing string-returning API above retains its original behaviour.
+async function requestLabCompletion(messages, options = {}) {
+  const started = Date.now();
+  let data;
+  try {
+    data = await postJson("/chat/completions", {
+      model: options.model || CONFIG.AI_LAB_MODEL || CONFIG.MODEL,
+      messages,
+      temperature: options.temperature ?? 0.4,
+      max_tokens: CONFIG.AI_LAB_MAX_TOKENS
+    }, { timeout: CONFIG.AI_LAB_TIMEOUT_MS, retries: 0, maxBytes: 256 * 1024 });
+  } catch (error) {
+    // Provider text may echo a prompt. Only stable error metadata leaves this adapter.
+    throw new ApiError("Lab provider request failed", { status: error.status, code: error.code });
+  }
+  const choice = data?.choices?.[0];
+  const text = extractMessageText(choice?.message?.content);
+  if (!text || Buffer.byteLength(text) > 128 * 1024) throw new ApiError("Invalid lab reply", { code: "INVALID_REPLY" });
+  const usage = {};
+  for (const key of ["prompt_tokens", "completion_tokens", "total_tokens", "cost"]) {
+    if (Number.isFinite(data.usage?.[key]) && data.usage[key] >= 0) usage[key] = data.usage[key];
+  }
+  return { text, model: typeof data.model === "string" ? data.model.slice(0, 150) : null,
+    requestedModel: options.model || CONFIG.AI_LAB_MODEL || CONFIG.MODEL,
+    finishReason: typeof choice.finish_reason === "string" ? choice.finish_reason : null,
+    usage, elapsedMs: Date.now() - started };
 }
 
 // Asks once; if the model repeats its previous long answer verbatim, asks once more with a correction.
@@ -463,6 +492,7 @@ async function draftAccountReply(chatId, text, senderProfile = {}, options = {})
 }
 
 module.exports = {
+  requestLabCompletion,
   requestAICompletion,
   askAI,
   askAIWithImage,

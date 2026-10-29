@@ -105,7 +105,7 @@ test("не-владелец не видит служебных команд и �
   });
 });
 
-test("меню команд Telegram: 6 публичных всем, полное - только в чате владельца (F028)", async () => {
+test("меню команд Telegram: публичные всем, полное - только в чате владельца (F028)", async () => {
   await withApp({ env: OWNER_ENV }, async ({ tg }) => {
     await tg.waitFor(() => tg.sent("setMyCommands").length >= 2, 6000, "две установки меню");
 
@@ -113,9 +113,9 @@ test("меню команд Telegram: 6 публичных всем, полно�
     const publicMenu = calls.find((call) => !call.scope);
     const ownerMenu = calls.find((call) => call.scope);
 
-    assert.deepEqual(publicMenu.commands.map((entry) => entry.command), ["start", "menu", "help", "voice", "status", "reset"]);
+    assert.deepEqual(publicMenu.commands.map((entry) => entry.command), ["start", "menu", "help", "voice", "status", "reset", "lab"]);
     assert.deepEqual(ownerMenu.scope, { type: "chat", chat_id: OWNER });
-    assert.equal(ownerMenu.commands.length, 25);
+    assert.equal(ownerMenu.commands.length, 26);
     assert.ok(ownerMenu.commands.some((entry) => entry.command === "account_unblock"));
     assert.ok(ownerMenu.commands.every((entry) => entry.description.length <= 256 && /^[a-z0-9_]{1,32}$/.test(entry.command)));
   });

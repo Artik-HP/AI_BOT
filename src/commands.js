@@ -37,7 +37,8 @@ const BUTTONS = {
   status: "Статус",
   voice: "Голосовые",
   reset: "Очистить память",
-  menu: "Меню"
+  menu: "Меню",
+  lab: "🔬 AI-лаборатория"
 };
 
 const MAIN_KEYBOARD = {
@@ -45,7 +46,8 @@ const MAIN_KEYBOARD = {
     keyboard: [
       [{ text: BUTTONS.help }, { text: BUTTONS.status }],
       [{ text: BUTTONS.voice }, { text: BUTTONS.reset }],
-      [{ text: BUTTONS.menu }]
+      [{ text: BUTTONS.menu }],
+      ...(CONFIG.AI_LAB_ENABLED ? [[{ text: BUTTONS.lab }]] : [])
     ],
     resize_keyboard: true,
     is_persistent: true,
@@ -76,7 +78,8 @@ const PUBLIC_COMMANDS = [
   { command: "help", description: "Что умеет бот" },
   { command: "voice", description: "Как работают голосовые", usage: "/voice - как отправлять голосовые" },
   { command: "status", description: "Проверить память и лимиты", usage: "/status - память и лимиты" },
-  { command: "reset", description: "Очистить память этого чата", usage: "/reset - очистить память этого чата" }
+  { command: "reset", description: "Очистить память этого чата", usage: "/reset - очистить память этого чата" },
+  ...(CONFIG.AI_LAB_ENABLED ? [{ command: "lab", description: "AI-лаборатория", usage: "/lab - идеи, эксперименты, обучение и инструменты" }] : [])
 ];
 
 const OWNER_COMMANDS = [

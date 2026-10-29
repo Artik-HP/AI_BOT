@@ -34,7 +34,7 @@ function formatAnnotation(data, root = process.cwd()) {
   const properties = [];
 
   if (data.file) {
-    properties.push(`file=${escapeProperty(path.relative(root, data.file) || data.file)}`);
+    properties.push(`file=${escapeProperty((path.relative(root, data.file) || data.file).split(path.sep).join("/"))}`);
   }
 
   if (data.line) {

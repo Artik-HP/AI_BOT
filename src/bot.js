@@ -146,10 +146,11 @@ function start() {
   }
 
   const bot = createTelegramBot();
+  const lab = CONFIG.AI_LAB_ENABLED ? require("./lab/telegram").registerLab(bot) : null;
   commands.initCommands(bot);
   registerVoiceHandler(bot);
   registerPhotoHandler(bot);
-  registerTextHandler(bot, commands);
+  registerTextHandler(bot, commands, lab);
   startAccountAssistant(bot).catch((error) => {
     logger.error("Account assistant start error:", error);
   });
@@ -207,6 +208,7 @@ function start() {
     try {
       await stopTelegramPolling(bot);
       await waitForChatTasks(CHAT_TASKS_GRACE_MS);
+      await lab?.close();
       await stopAccountAssistant();
 
       if (server?.listening) {

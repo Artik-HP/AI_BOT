@@ -14,6 +14,7 @@ userbot.session*
 # данные пользователей: память бота, резервные копии и «повреждённые» файлы
 memory.json
 memory.json.*
+*.lab.json*
 *.corrupt-*
 
 # логи и артефакты
