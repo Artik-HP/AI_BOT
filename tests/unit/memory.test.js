@@ -175,10 +175,13 @@ test("настроение: границы слов, а не подстроки 
   assert.equal(moodFor("я тебя ненавижу"), "aggressive");
 });
 
-test("системный промпт: запрет на инструкции восстановлен, мошенничеству не помогает (F005)", () => {
+test("системный промпт: запрет на инструкции восстановлен, мошенничеству не помогает (F005, классический характер)", () => {
   const { file } = tempMemory();
   const memory = loadMemory(file, { MEMORY_SAVE_DEBOUNCE_MS: "60000" });
-  const prompt = memory.buildSystemPrompt(memory.getUserMemory("p")).content;
+  const state = memory.getUserMemory("p");
+
+  state.persona = "classic";
+  const prompt = memory.buildSystemPrompt(state).content;
 
   assert.doesNotMatch(prompt, /Должен давай/);
   assert.doesNotMatch(prompt, /помоги выдумать как выманить/);

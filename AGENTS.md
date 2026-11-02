@@ -32,6 +32,9 @@ npm run check            # lint + test
 - `src/handlers/` — `text`, `voice`, `photo`, `guard` (допуск и лимиты).
 - `src/services/` — `telegram`, `openrouter`, `memory`, `access`, `accountAssistant`.
 - `src/utils/` — `logger`, `errors`, `redact`, `text`, `queue`, `ttlSet`, `safe`.
+- `src/ideas/` — генератор идей (характер по умолчанию): `prompt.md`, `catalog.js` (пулы искр, приёмы), `spark.js` (формы искры `SPARK_SHAPES`; новый ингредиент = пул в `SPARK_POOLS` + `INGREDIENT_POOLS` + подпись в `SPARK_LABELS`), `recent.js` (недавние искры чата: только память процесса), `bank.js`, `tools.js` (функции модели), `commands.js` (команды и кнопки: из него строятся меню Telegram, `/help` и сайт). `src/handlers/ideas.js` — их обработчики, `src/handlers/reply.js` — общий ответ ИИ (его использует и текстовый обработчик).
+- `src/site.js` + `public/` — сайт на `/` и `GET /api/spark`. Только статика без секретов под строгим CSP: без инлайн-стилей и скриптов, без внешних адресов.
+- Функция модели добавляется в `HANDLERS` и в набор своего характера (`toolsFor` в `src/companion/tools.js`), её имя — в промпте этого характера: договор «промпт ↔ код» проверяют тесты. У каждого нового кода отказа должна быть подсказка модели: `hint` в ответе или запись в `src/companion/hints.js` (проверяет `tests/unit/companion-hints.test.js`).
 - `scripts/` — `userbot.js`, `create-telegram-session.js`.
 - `audit-reports/` — отчёты аудита; старые отчёты не удалять и не переписывать.
 

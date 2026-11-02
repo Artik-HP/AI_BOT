@@ -3,6 +3,7 @@ const path = require("path");
 const CONFIG = require("../config");
 const logger = require("../utils/logger");
 const { sanitizeInline, trimLineEnds } = require("../utils/text");
+const { PERSONAS, resolvePersona, usesCompanionEngine, buildPersonaPrompt } = require("../companion/persona");
 
 const {
   MAX_HISTORY_MESSAGES,
@@ -227,7 +228,8 @@ function createEmptyMemory() {
     personalNotes: [],
     messageCount: 0,
     lastSeen: null,
-    summary: ""
+    summary: "",
+    persona: null
   };
 }
 
@@ -392,6 +394,7 @@ function normalizeUserMemory(value) {
     ? Number(value.messageCount)
     : normalizedMessages.filter((message) => message.role === "user").length;
   memory.lastSeen = typeof value.lastSeen === "string" ? value.lastSeen : null;
+  memory.persona = PERSONAS.includes(value.persona) ? value.persona : null;
 
   return memory;
 }
@@ -629,13 +632,21 @@ function getMoodInstruction(memory) {
   return moodInstructions[memory.mood] || moodInstructions.neutral;
 }
 
-function buildSystemPrompt(memory) {
+// `context` (tools, speaker, chat kind, first contact, saved facts, idea bank) is used by the ideas and companion
+// characters only; the classic one ignores it.
+function buildSystemPrompt(memory, context = {}) {
+  const longTermMemory = buildLongTermMemoryText(memory);
+  const persona = resolvePersona(memory);
+
+  if (usesCompanionEngine(persona)) {
+    return buildPersonaPrompt(persona, memory, { ...context, longTermMemory });
+  }
+
   const trustLabel = memory.trust >= 8
     ? "high"
     : memory.trust <= -3
       ? "low"
       : "normal";
-  const longTermMemory = buildLongTermMemoryText(memory);
 
   return {
     role: "system",
@@ -727,8 +738,26 @@ function buildReplyCorrectionMessage(text) {
   };
 }
 
+function getPersona(chatId) {
+  return resolvePersona(getUserMemory(chatId));
+}
+
+// `null` returns the chat to the default character (COMPANION_DEFAULT_PERSONA).
+function setPersona(chatId, persona) {
+  getUserMemory(chatId).persona = PERSONAS.includes(persona) ? persona : null;
+  scheduleSave();
+}
+
+// The chosen character is a setting of the chat, not part of the conversation: clearing memory keeps it.
 function resetMemory(chatId) {
+  const persona = users[String(chatId)]?.persona || null;
+
   delete users[String(chatId)];
+
+  if (persona) {
+    getUserMemory(chatId).persona = persona;
+  }
+
   scheduleSave();
 }
 
@@ -746,6 +775,8 @@ module.exports = {
   getUserMemory,
   remember,
   resetMemory,
+  getPersona,
+  setPersona,
   getUserCount,
   updatePersonalityMemory,
   getLastMessageByRole,

@@ -3,6 +3,7 @@ const logger = require("./utils/logger");
 const { parseBoolean } = require("./utils/parse");
 
 const ACCOUNT_ASSISTANT_MODES = ["approval", "auto", "dry-run"];
+const COMPANION_PERSONAS = ["ideas", "companion", "classic"];
 const BOT_TOKEN_PATTERN = /^\d{5,}:[\w-]{20,}$/;
 const CHAT_ID_PATTERN = /^-?\d+$/;
 const BYTES_PATTERN = /^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb)?$/i;
@@ -155,7 +156,7 @@ function readUrl(env, name, fallback, warn) {
 
     return raw.replace(/\/+$/, "");
   } catch {
-    warn(`${name}: «${raw}» не URL (нужен http:// или https://), используется ${fallback}`);
+    warn(`${name}: «${raw}» не URL (нужен http:// или https://), используется ${fallback || "пусто"}`);
     return fallback;
   }
 }
@@ -167,6 +168,9 @@ function buildConfig(env = process.env, warn = logger.warn) {
     generic: readChatId(env, ["BOT_OWNER_CHAT_ID"], warn),
     legacy: readChatId(env, ["OWNER_CHAT_ID"], warn)
   };
+
+  const productName = readString(env, "PRODUCT_NAME", "Генератор идей", warn);
+  const memoryFile = env.MEMORY_FILE ? path.resolve(env.MEMORY_FILE) : path.join(__dirname, "..", "memory.json");
 
   return {
     MODEL: readString(env, "OPENROUTER_MODEL", "openai/gpt-4o-mini", warn),
@@ -187,14 +191,13 @@ function buildConfig(env = process.env, warn = logger.warn) {
     OPENROUTER_API_KEY: clean(env, "OPENROUTER_API_KEY"),
     PORT: readNumber(env, "PORT", 12722, warn, { min: 0, max: 65535, integer: true }),
     HOST: readEnum(env, "HOST", ["127.0.0.1", "0.0.0.0", "::1", "::"], "127.0.0.1", warn),
-    PRODUCT_NAME: readString(env, "PRODUCT_NAME", "AI-помощник", warn),
+    PRODUCT_NAME: productName,
+    PUBLIC_BOT_URL: readUrl(env, "PUBLIC_BOT_URL", "", warn),
     HEALTH_TOKEN: clean(env, "HEALTH_TOKEN"),
     STT_LANGUAGE: readString(env, "OPENROUTER_STT_LANGUAGE", undefined, warn),
     MAX_AUDIO_BYTES: readBytes(env, "MAX_AUDIO_BYTES", 25 * 1024 * 1024, warn),
     MAX_IMAGE_BYTES: readBytes(env, "MAX_IMAGE_BYTES", 10 * 1024 * 1024, warn),
-    MEMORY_FILE: env.MEMORY_FILE
-      ? path.resolve(env.MEMORY_FILE)
-      : path.join(__dirname, "..", "memory.json"),
+    MEMORY_FILE: memoryFile,
 
     MAX_HISTORY_MESSAGES: readNumber(env, "MAX_HISTORY_MESSAGES", 60, warn, { min: 1, integer: true }),
     MAX_STORED_MESSAGES: readNumber(env, "MAX_STORED_MESSAGES", 300, warn, { min: 1, integer: true }),
@@ -214,6 +217,14 @@ function buildConfig(env = process.env, warn = logger.warn) {
     AI_LAB_TIMEOUT_MS: readNumber(env, "AI_LAB_TIMEOUT_MS", 60000, warn, { min: 100, max: 120000, integer: true }),
     AI_LAB_DAILY_REQUESTS: readNumber(env, "AI_LAB_DAILY_REQUESTS", 30, warn, { min: 2, max: 200, integer: true }),
     AI_LAB_MAX_BYTES: readBytes(env, "AI_LAB_MAX_BYTES", 10 * 1024 * 1024, warn),
+
+    COMPANION_DEFAULT_PERSONA: readEnum(env, "COMPANION_DEFAULT_PERSONA", COMPANION_PERSONAS, "ideas", warn),
+    COMPANION_NAME: readString(env, "COMPANION_NAME", productName, warn),
+    COMPANION_TOOLS_ENABLED: readBoolean(env, "COMPANION_TOOLS_ENABLED", true, warn),
+    COMPANION_MAX_TOOL_ROUNDS: readNumber(env, "COMPANION_MAX_TOOL_ROUNDS", 4, warn, { min: 1, max: 8, integer: true }),
+    COMPANION_FILE: path.resolve(clean(env, "COMPANION_FILE") || `${memoryFile}.rpg.json`),
+    COMPANION_MAX_BYTES: readBytes(env, "COMPANION_MAX_BYTES", 5 * 1024 * 1024, warn),
+    COMPANION_REMINDER_TICK_MS: readNumber(env, "COMPANION_REMINDER_TICK_MS", 10000, warn, { min: 100, max: 60000, integer: true }),
 
     OWNER_CHAT_IDS: [...new Set(Object.values(owner).filter(Boolean))],
     BOT_ALLOWED_USER_IDS: readIdList(env, "BOT_ALLOWED_USER_IDS", warn),

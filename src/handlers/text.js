@@ -1,16 +1,8 @@
 const logger = require("../utils/logger");
-const { safeHandler, trySendMessage } = require("../utils/safe");
-const { askAI } = require("../services/openrouter");
-const {
-  claimIncomingMessage,
-  getBotToBotReplyOptions,
-  enqueueChatTask,
-  sendAIResponse
-} = require("../services/telegram");
-const { admitMessage, showTyping, messageAuthorized } = require("./guard");
-const { withMessageAuth } = require("../services/auth");
-
-const AI_ERROR_MESSAGE = "Не получилось получить ответ от ИИ. Попробуй ещё раз чуть позже.";
+const { safeHandler } = require("../utils/safe");
+const { claimIncomingMessage } = require("../services/telegram");
+const { admitMessage } = require("./guard");
+const { answerWithAi } = require("./reply");
 
 function getAIText(text, isBotMessage) {
   if (!text || !isBotMessage || !text.startsWith("/")) {
@@ -42,32 +34,17 @@ function registerTextHandler(bot, commands, lab = null) {
     if (!isBotMessage && lab && (text === commands.BUTTONS.lab || lab.hasSession(msg))) {
       if (text === commands.BUTTONS.lab) await lab.open(msg);
       else if (!Object.values(commands.BUTTONS).includes(text)) await lab.handleText(msg);
-      else { lab.exit(msg); await commands.handleMenuButton(chatId, text, msg.from.id); }
+      else { lab.exit(msg); await commands.handleMenuButton(chatId, text, msg.from.id, msg); }
       return;
     }
 
     logger.message("in", { chatId, userId: msg.from?.id, username: msg.from?.username }, text);
 
-    if (!isBotMessage && text && await commands.handleMenuButton(chatId, text, msg.from.id)) {
+    if (!isBotMessage && text && await commands.handleMenuButton(chatId, text, msg.from.id, msg)) {
       return;
     }
 
-    await enqueueChatTask(chatId, () => withMessageAuth(msg, async () => {
-      try {
-        if (!messageAuthorized(msg)) return;
-        await showTyping(bot, chatId);
-        const aiReply = await askAI(chatId, aiText, msg.from);
-        if (!messageAuthorized(msg)) return;
-        await sendAIResponse(chatId, aiReply, {
-          sourceMessageId: msg.message_id,
-          ...(isBotMessage ? getBotToBotReplyOptions(msg) : {})
-        });
-      } catch (error) {
-        if (!messageAuthorized(msg)) return;
-        logger.error("AI error:", error);
-        await trySendMessage(bot, chatId, AI_ERROR_MESSAGE);
-      }
-    }));
+    await answerWithAi(bot, msg, aiText);
   }));
 }
 

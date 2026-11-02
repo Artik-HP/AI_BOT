@@ -15,6 +15,7 @@ userbot.session*
 memory.json
 memory.json.*
 *.lab.json*
+*.rpg.json*
 *.corrupt-*
 
 # логи и артефакты

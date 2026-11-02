@@ -40,6 +40,9 @@ async function launchApp({ tg, or, env = {}, entry = "index.js", legacy = proces
     PORT: String(appPort),
     MEMORY_FILE: path.join(tmp, "memory.json"),
     MEMORY_SAVE_DEBOUNCE_MS: "40",
+    // The product default is the ideas character; the older suites exercise the companion one and pin it here.
+    // A test of the real default passes COMPANION_DEFAULT_PERSONA: undefined, which removes the variable below.
+    COMPANION_DEFAULT_PERSONA: "companion",
     TELEGRAM_API_BASE_URL: tg.url,
     OPENROUTER_BASE_URL: or ? or.baseUrl : "",
     FAKE_TG_URL: tg.url,
@@ -145,7 +148,7 @@ async function launchApp({ tg, or, env = {}, entry = "index.js", legacy = proces
     },
     async http(pathname, headers = {}) {
       const response = await fetch(`http://127.0.0.1:${appPort}${pathname}`, { headers });
-      return { status: response.status, text: await response.text() };
+      return { status: response.status, text: await response.text(), headers: response.headers };
     }
   };
 }

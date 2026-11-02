@@ -212,13 +212,15 @@ test("GET /health публично отдаёт только ok и uptime (F006)
     const health = await app.http("/health");
     const body = JSON.parse(health.text);
 
-    assert.equal(root.text, "Bot is alive");
+    assert.equal(root.status, 200);
+    assert.match(root.text, /<title>Генератор идей — бот, который придумывает идеи<\/title>/, "на / теперь страница бота идей, а не «Bot is alive»");
     assert.equal(health.status, 200);
     assert.deepEqual(Object.keys(body).sort(), ["ok", "uptimeSec"]);
     assert.equal(body.ok, true);
 
     for (const secret of ["alice_friend", "777000111", "spam_account", "999000222", "1001234567890", "peer_test_bot", "gpt-4o"]) {
       assert.ok(!health.text.includes(secret), `публичный /health раскрывает ${secret}`);
+      assert.ok(!root.text.includes(secret), `публичная страница раскрывает ${secret}`);
     }
   });
 });

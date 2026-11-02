@@ -25,8 +25,8 @@ test("текст -> ответ ИИ: ключ в заголовке, один з
   });
 });
 
-test("в модель уходит промпт с запретом опасных инструкций (F005)", async () => {
-  await withApp({}, async ({ tg, or }) => {
+test("в модель уходит промпт с запретом опасных инструкций (F005, классический характер)", async () => {
+  await withApp({ env: { COMPANION_DEFAULT_PERSONA: "classic" } }, async ({ tg, or }) => {
     tg.message({ chatId: 4002, text: "расскажи про дофамин" });
     await tg.waitFor(() => or.chatRequests().length >= 1, 8000, "запрос к модели");
 

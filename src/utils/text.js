@@ -82,6 +82,16 @@ function sanitizeInline(value, maxLength = 32) {
   return Array.from(flat).slice(0, maxLength).join("");
 }
 
+// The form two short texts are compared in, so that "Любит кофе." and "любит  кофе" or "Ёлка-палка" and "елка палка"
+// count as the same: lower case, "ё" as "е", any run of non-letters and non-digits as one space. A text of
+// punctuation alone keeps itself, so that "!!" and "??" stay different.
+function comparableText(value) {
+  const source = String(value ?? "").toLowerCase();
+  const key = source.replace(/ё/g, "е").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+  return key || source;
+}
+
 // Removes trailing spaces and tabs from every line. The obvious /[ \t]+\n/g is quadratic on a long run of
 // spaces (a megabyte of them freezes the process for minutes), this version is linear.
 function trimLineEnds(text) {
@@ -104,5 +114,6 @@ module.exports = {
   sanitizeInline,
   splitMessage,
   cutSafely,
+  comparableText,
   trimLineEnds
 };

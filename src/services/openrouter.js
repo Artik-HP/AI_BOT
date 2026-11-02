@@ -147,6 +147,61 @@ async function requestLabCompletion(messages, options = {}) {
     usage, elapsedMs: Date.now() - started };
 }
 
+function normalizeToolCalls(rawCalls) {
+  if (!Array.isArray(rawCalls)) {
+    return [];
+  }
+
+  return rawCalls.flatMap((call, index) => {
+    const name = call?.function?.name;
+
+    if (typeof name !== "string" || !name) {
+      return [];
+    }
+
+    const args = call.function.arguments;
+
+    return [{
+      id: typeof call.id === "string" && call.id ? call.id : `call_${Date.now()}_${index}`,
+      type: "function",
+      function: { name, arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}) }
+    }];
+  });
+}
+
+// One chat request that may answer with tool calls instead of text; the loop around it is src/companion/engine.js.
+// Sampling is calmer than in requestAICompletion: repetition penalties distort structured tool arguments.
+async function requestToolCompletion(messages, options = {}) {
+  const body = {
+    model: options.model || CONFIG.MODEL,
+    messages,
+    temperature: options.temperature ?? 0.8,
+    top_p: 0.95,
+    max_tokens: options.maxTokens || CONFIG.OPENROUTER_MAX_TOKENS
+  };
+
+  if (options.tools?.length) {
+    body.tools = options.tools;
+    body.tool_choice = options.toolChoice || "auto";
+  }
+
+  const data = await postJson("/chat/completions", body, {
+    timeout: options.timeout || REQUEST_TIMEOUT_MS,
+    retries: 1
+  });
+  const choice = data?.choices?.[0];
+  const message = choice?.message || {};
+  const toolCalls = normalizeToolCalls(message.tool_calls);
+  const text = dedupeRepeatedReply(extractMessageText(message.content));
+
+  return {
+    text,
+    toolCalls,
+    assistantMessage: { role: "assistant", content: text || null, tool_calls: toolCalls },
+    finishReason: typeof choice?.finish_reason === "string" ? choice.finish_reason : null
+  };
+}
+
 // Asks once; if the model repeats its previous long answer verbatim, asks once more with a correction.
 // A second repeat is accepted as is: the user always gets an answer.
 async function requestWithRepeatGuard({ memory, text, history, currentTurn, requestOptions }) {
@@ -502,6 +557,7 @@ async function draftAccountReply(chatId, text, senderProfile = {}, options = {})
 
 module.exports = {
   requestLabCompletion,
+  requestToolCompletion,
   requestAICompletion,
   askAI,
   askAIWithImage,

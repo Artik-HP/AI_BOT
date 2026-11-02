@@ -20,6 +20,11 @@ export default [
     }
   },
   {
+    // The website script runs in the browser (it needs document, not require).
+    files: ["public/**/*.js"],
+    languageOptions: { sourceType: "script", globals: { ...globals.browser } }
+  },
+  {
     // The logger and the interactive session script write to the console on purpose.
     files: ["src/utils/logger.js", "scripts/create-telegram-session.js", "tests/**/*.js"],
     rules: { "no-console": "off" }

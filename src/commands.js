@@ -12,13 +12,22 @@ const {
 const {
   MAX_HISTORY_MESSAGES,
   MAX_STORED_MESSAGES,
+  getPersona,
   getUserMemory,
-  resetMemory
+  resetMemory,
+  setPersona
 } = require("./services/memory");
+const { PERSONAS, parsePersonaName, personaLabel } = require("./companion/persona");
+const { cancelReminders, listReminders } = require("./companion/reminders");
+const { getStore } = require("./companion/store");
+const { forgetChat } = require("./companion/tools");
 const { isOwner } = require("./services/access");
 const { admitCallback, admitMessage } = require("./handlers/guard");
+const { IDEA_BUTTONS, IDEA_COMMANDS, kindForButton, createIdeaCommands } = require("./handlers/ideas");
+const { sparkHistory } = require("./ideas/recent");
 
 let bot;
+let ideaCommands;
 const menuSessions = new Map();
 
 function boundInlineMenu(chatId, userId, messageId = null) {
@@ -46,6 +55,7 @@ function onUserText(regexp, callback) {
 }
 
 const BUTTONS = {
+  ...IDEA_BUTTONS,
   help: "Помощь",
   status: "Статус",
   voice: "Голосовые",
@@ -57,6 +67,8 @@ const BUTTONS = {
 const MAIN_KEYBOARD = {
   reply_markup: {
     keyboard: [
+      [{ text: BUTTONS.idea }, { text: BUTTONS.spark }],
+      [{ text: BUTTONS.brainstorm }, ...(BUTTONS.ideas ? [{ text: BUTTONS.ideas }] : [])],
       [{ text: BUTTONS.help }, { text: BUTTONS.status }],
       [{ text: BUTTONS.voice }, { text: BUTTONS.reset }],
       [{ text: BUTTONS.menu }],
@@ -64,7 +76,7 @@ const MAIN_KEYBOARD = {
     ],
     resize_keyboard: true,
     is_persistent: true,
-    input_field_placeholder: "Напиши текст или отправь голосовое"
+    input_field_placeholder: "Назови тему или нажми «🎲 Искра»"
   }
 };
 
@@ -87,11 +99,14 @@ const INLINE_MENU = {
 // Every command has one definition: the Telegram menu and /help are generated from it.
 const PUBLIC_COMMANDS = [
   { command: "start", description: "Запустить бота и показать меню" },
+  ...IDEA_COMMANDS,
   { command: "menu", description: "Показать кнопки", usage: "/menu - показать кнопки" },
   { command: "help", description: "Что умеет бот" },
   { command: "voice", description: "Как работают голосовые", usage: "/voice - как отправлять голосовые" },
   { command: "status", description: "Проверить память и лимиты", usage: "/status - память и лимиты" },
   { command: "reset", description: "Очистить память этого чата", usage: "/reset - очистить память этого чата" },
+  { command: "style", description: "Характер бота: идеи, собеседник или классика", usage: "/style - характер бота (идеи, собеседник или классика)" },
+  ...(CONFIG.COMPANION_TOOLS_ENABLED ? [{ command: "reminders", description: "Мои напоминания", usage: "/reminders - мои напоминания, /reminders clear - отменить все" }] : []),
   { command: "login", description: "Войти по паролю", usage: "/login - войти заново" },
   { command: "logout", description: "Закрыть доступ", usage: "/logout - выйти и закрыть доступ" },
   { command: "me", description: "Мой доступ", usage: "/me - срок и статус доступа" },
@@ -145,6 +160,7 @@ function registerCommandMenus(telegramBot) {
 
 function initCommands(telegramBot) {
   bot = telegramBot;
+  ideaCommands = createIdeaCommands({ bot, keyboard: MAIN_KEYBOARD });
 
   registerCommandMenus(bot);
 
@@ -152,6 +168,10 @@ function initCommands(telegramBot) {
     const chatId = msg.chat.id;
     return sendMainMenu(chatId, msg.from.id);
   });
+
+  for (const { command } of IDEA_COMMANDS) {
+    onUserText(new RegExp(`^/${command}(?:@\\w+)?(?:\\s|$)`), (msg) => ideaCommands.command(command, msg));
+  }
 
   onUserText(/^\/help(?:@\w+)?(?:\s|$)/, async (msg) => {
     const chatId = msg.chat.id;
@@ -162,6 +182,16 @@ function initCommands(telegramBot) {
     const chatId = msg.chat.id;
     return resetChatMemory(chatId);
   });
+
+  onUserText(/^\/style(?:@\w+)?(?:\s|$)/, async (msg) => {
+    await handleStyle(msg);
+  });
+
+  if (CONFIG.COMPANION_TOOLS_ENABLED) {
+    onUserText(/^\/reminders(?:@\w+)?(?:\s|$)/, async (msg) => {
+      await handleReminders(msg);
+    });
+  }
 
   onUserText(/^\/menu(?:@\w+)?(?:\s|$)/, async (msg) => {
     await sendMainMenu(msg.chat.id, msg.from.id);
@@ -220,10 +250,10 @@ async function sendMainMenu(chatId, userId = chatId) {
   await bot.sendMessage(
     chatId,
     [
-      "Я на месте. Кнопки снизу, голосовые тоже слушаю.",
+      "Я на месте и полон идей. Назови тему, и я что-нибудь придумаю, или нажми «🎲 Искра», и я удивлю.",
       CONFIG.PRODUCT_NAME,
       "",
-      "Можешь просто писать текстом, отправлять voice или выбрать команду:"
+      "Можно писать текстом, отправлять голосовое или выбрать кнопку:"
     ].join("\n"),
     MAIN_KEYBOARD
   );
@@ -274,6 +304,7 @@ async function sendStatus(chatId) {
     `Trust: ${memory.trust}`,
     `Style: ${memory.style}`,
     `Nickname: ${memory.nickname || "-"}`,
+    `Характер: ${personaLabel(getPersona(chatId))}`,
     `Лимит аудио: ${Math.round(CONFIG.MAX_AUDIO_BYTES / 1024 / 1024)} MB`
   ];
 
@@ -391,13 +422,110 @@ async function sendBotMessageFromCommand(chatId, text, userId = chatId) {
   }
 }
 
+const STYLE_LINES = {
+  ideas: "/style идеи - придумываю идеи: искры, приёмы, банк идей",
+  companion: "/style собеседник - игры, RPG и мини-программы, без мата и 18+",
+  classic: "/style классика - прежний острый характер: сарказм, мат, фарма и JavaScript"
+};
+
+async function handleStyle(msg) {
+  const chatId = msg.chat.id;
+  const argument = String(msg.text || "").replace(/^\/style(?:@\w+)?/i, "").trim();
+
+  if (!argument) {
+    await bot.sendMessage(chatId, [
+      `Сейчас: ${personaLabel(getPersona(chatId))}.`,
+      "",
+      ...PERSONAS.map((persona) => `${STYLE_LINES[persona]}${persona === CONFIG.COMPANION_DEFAULT_PERSONA ? " (по умолчанию)" : ""}`)
+    ].join("\n"), MAIN_KEYBOARD);
+    return;
+  }
+
+  const next = parsePersonaName(argument);
+
+  if (!next) {
+    await bot.sendMessage(chatId, "Такого характера нет. Варианты: идеи, собеседник, классика.", MAIN_KEYBOARD);
+    return;
+  }
+
+  if (msg.chat.type !== "private" && !isOwner(msg.from?.id)) {
+    await bot.sendMessage(chatId, "В группе характер меняет только владелец бота.");
+    return;
+  }
+
+  setPersona(chatId, next);
+  await bot.sendMessage(chatId, `Готово, теперь характер: ${personaLabel(next)}.`, MAIN_KEYBOARD);
+}
+
+function formatReminderTime(timestamp) {
+  return `${new Date(timestamp).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+async function handleReminders(msg) {
+  const chatId = msg.chat.id;
+  const userId = msg.from?.id ?? chatId;
+  const argument = String(msg.text || "").replace(/^\/reminders(?:@\w+)?/i, "").trim().toLowerCase();
+
+  try {
+    const store = getStore();
+    const cancelOne = argument.match(/^(?:cancel|отмена)\s+([0-9a-f]{8})$/);
+
+    if (argument === "clear" || argument === "очистить" || cancelOne) {
+      const removed = cancelReminders(store, chatId, userId, cancelOne ? cancelOne[1] : null);
+
+      await bot.sendMessage(chatId, removed ? `Отменено напоминаний: ${removed}.` : "Отменять нечего.");
+      return;
+    }
+
+    const list = listReminders(store, chatId, userId);
+
+    if (!list.length) {
+      await bot.sendMessage(chatId, "Напоминаний нет. Попроси меня в разговоре: «напомни через час позвонить маме».");
+      return;
+    }
+
+    await bot.sendMessage(chatId, [
+      "Твои напоминания:",
+      ...list.map((item) => `${formatReminderTime(item.dueAt)} - ${item.text} (код ${item.id})`),
+      "",
+      "Отменить одно: /reminders cancel код. Отменить все: /reminders clear."
+    ].join("\n"));
+  } catch (error) {
+    logger.error("Reminders command error:", error);
+    await bot.sendMessage(chatId, "Напоминания сейчас недоступны. Попробуй позже.");
+  }
+}
+
 async function resetChatMemory(chatId) {
   resetMemory(chatId);
+  // Which sparks the chat saw lately is memory of the talk as well.
+  sparkHistory.forget(chatId);
+
+  // Facts the companion saved about people in this chat are memory too. Characters and games are progress and stay.
+  if (CONFIG.COMPANION_TOOLS_ENABLED) {
+    try {
+      forgetChat(getStore(), chatId);
+    } catch (error) {
+      logger.error("Could not clear saved facts:", error);
+    }
+  }
 
   await bot.sendMessage(chatId, "Память этого чата очищена.", MAIN_KEYBOARD);
 }
 
-async function handleMenuButton(chatId, text, userId = chatId) {
+// `msg` is the whole incoming message: the idea buttons start a request to the model, which needs its author and chat.
+async function handleMenuButton(chatId, text, userId = chatId, msg = null) {
+  const ideaKind = kindForButton(text);
+
+  if (ideaKind) {
+    if (!msg || !ideaCommands) {
+      return false;
+    }
+
+    await ideaCommands.button(ideaKind, msg);
+    return true;
+  }
+
   if (text === BUTTONS.menu) {
     await sendMainMenu(chatId, userId);
     return true;

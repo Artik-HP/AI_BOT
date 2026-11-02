@@ -2,7 +2,8 @@ const path = require("path");
 const CONFIG = require("../config");
 const logger = require("../utils/logger");
 const { safeHandler, trySendMessage } = require("../utils/safe");
-const { askAI, transcribeAudio } = require("../services/openrouter");
+const { transcribeAudio } = require("../services/openrouter");
+const { respond } = require("../companion/engine");
 const {
   claimIncomingMessage,
   enqueueChatTask,
@@ -87,7 +88,10 @@ async function handleAudioMessage(bot, chatId, msg, audio) {
     ? `Voice message transcript: ${transcript}\nCaption: ${caption}`
     : transcript;
 
-  const aiReply = await askAI(chatId, userText, msg.from);
+  const aiReply = await respond(chatId, userText, msg.from, {
+    type: msg.chat?.type,
+    onRound: () => showTyping(bot, chatId)
+  });
   if (!messageAuthorized(msg)) return;
   await sendAIResponse(chatId, aiReply, { sourceMessageId: msg.message_id, ...getBotToBotReplyOptions(msg) });
 }

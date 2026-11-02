@@ -100,9 +100,10 @@ test("auth gate: old main-menu callbacks are rejected after re-login", async () 
     await send(tg, "/logout"); await login(tg);
     const before = tg.texts().length;
     tg.callback({ chatId: USER, data: reset.callback_data, messageId: old.messageId });
+    // The library polls every 300 ms, so the answer takes about 190-210 ms: a fixed 200 ms wait failed one run in five.
+    await tg.waitFor(() => tg.sent("answerCallbackQuery").some((item) => item.text?.includes("Кнопка истекла")), 5000, "toast about the expired button");
     await tg.quiet(200);
     assert.ok(!tg.texts().slice(before).some((text) => text.includes("Память этого чата очищена")));
-    assert.ok(tg.sent("answerCallbackQuery").some((item) => item.text?.includes("Кнопка истекла")));
   });
 });
 

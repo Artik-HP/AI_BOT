@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const express = require("express");
 const CONFIG = require("./config");
 const logger = require("./utils/logger");
+const { registerSite } = require("./site");
 
 const SHUTDOWN_TIMEOUT_MS = 15000;
 const CHAT_TASKS_GRACE_MS = 8000;
@@ -34,9 +35,7 @@ function createWebApp({ getDetails }) {
 
   app.disable("x-powered-by");
 
-  app.get("/", (req, res) => {
-    res.send("Bot is alive");
-  });
+  registerSite(app);
 
   app.get("/health", (req, res) => {
     res.json({ ok: true, uptimeSec: Math.round(process.uptime()) });
@@ -150,6 +149,7 @@ function start() {
   require("./services/auth").auth.accountPolicy = CONFIG.DATABASE_URL ? (userId) => require("./database").getDatabase().checkAccount(userId) : null;
   const lab = CONFIG.AI_LAB_ENABLED ? require("./lab/telegram").registerLab(bot) : null;
   commands.initCommands(bot);
+  const reminders = CONFIG.COMPANION_TOOLS_ENABLED ? require("./companion/reminders").startReminderScheduler(bot) : null;
   require("./services/auth").registerAuth(bot, (msg) => commands.sendMainMenu(msg.chat.id), (userId) => lab?.revokeUser(userId));
   registerVoiceHandler(bot);
   registerPhotoHandler(bot);
@@ -210,6 +210,7 @@ function start() {
 
     try {
       await stopTelegramPolling(bot);
+      reminders?.stop();
       await waitForChatTasks(CHAT_TASKS_GRACE_MS);
       await lab?.close();
       await accounts.close();

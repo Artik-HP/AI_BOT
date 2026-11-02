@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{PRODUCT_NAME}} — бот, который придумывает идеи</title>
+  <meta name="description" content="Telegram-бот, который придумывает идеи вместе с тобой: случайные искры, приёмы творческого мышления и банк идей.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#fbf7ef" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#11111c" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">К содержимому</a>
+
+  <header class="top">
+    <div class="wrap top-inner">
+      <a class="brand" href="/">
+        <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+          <rect width="64" height="64" rx="14"></rect>
+          <path d="M32 10l5.5 16.5L54 32l-16.5 5.5L32 54l-5.5-16.5L10 32l16.5-5.5z"></path>
+          <circle cx="48" cy="16" r="3.5"></circle>
+        </svg>
+        <span>{{PRODUCT_NAME}}</span>
+      </a>
+      {{TELEGRAM_LINK}}
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="wrap hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Бот для Telegram</p>
+        <h1>Идеи, которых <span class="mark">ты ещё не придумал</span></h1>
+        <p class="lead">
+          {{PRODUCT_NAME}} придумывает идеи вместе с тобой: бросает случайные «искры», которые сдвигают мысль
+          с накатанной колеи, применяет приёмы творческого мышления и запоминает лучшее в банк идей.
+        </p>
+        <div class="cta">
+          {{TELEGRAM_BUTTON}}
+          <a class="button ghost" href="#spark">Бросить кости ↓</a>
+        </div>
+      </div>
+
+      <section class="spark" id="spark" aria-labelledby="spark-title">
+        <h2 class="eyebrow" id="spark-title">Искра</h2>
+        <dl class="slots" id="slots">
+          <div class="slot"><dt>Область</dt><dd>…</dd></div>
+          <div class="slot"><dt>Ограничение</dt><dd>…</dd></div>
+          <div class="slot"><dt>Поворот</dt><dd>…</dd></div>
+        </dl>
+        <p class="technique" id="technique"></p>
+        <div class="shape-picker" role="group" aria-label="Сколько условий в искре">
+          <button class="chip" type="button" data-shape="" aria-pressed="true">Любая</button>
+          <button class="chip" type="button" data-shape="minimal" aria-pressed="false">Свободнее · 2</button>
+          <button class="chip" type="button" data-shape="maximal" aria-pressed="false">Конкретнее · 4</button>
+        </div>
+        <div class="spark-actions">
+          <button class="button primary" type="button" id="roll">🎲 Бросить кости</button>
+          <button class="button ghost" type="button" id="copy">Скопировать</button>
+        </div>
+        <p class="spark-note" id="spark-note" role="status" aria-live="polite"></p>
+        <noscript><p class="spark-note">Чтобы бросать кости на сайте, включи JavaScript. В Telegram искры работают и без него.</p></noscript>
+      </section>
+    </section>
+
+    <section class="wrap steps" aria-labelledby="steps-title">
+      <h2 id="steps-title">Как это работает</h2>
+      <ol class="step-list">
+        <li>
+          <h3>Назови тему или брось искру</h3>
+          <p>Напиши, что нужно придумать, или нажми «🎲 Искра»: случайные область, ограничение, поворот и иногда «для кого» выбирает не языковая модель, а честный генератор.</p>
+        </li>
+        <li>
+          <h3>Получи идеи и разверни лучшую</h3>
+          <p>Три разные идеи с первым шагом на пятнадцать минут. Скажи «развей 2», «безумнее», «дешевле» или «оцени»: бот не завышает оценки из вежливости.</p>
+        </li>
+        <li>
+          <h3>Сохрани в банк идей</h3>
+          <p>Попроси сохранить, и идея ляжет в твой банк с кодом, тегами и статусом. Вернуться к ней можно в любой момент командой /ideas.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="wrap techniques" aria-labelledby="tech-title">
+      <h2 id="tech-title">Приёмы в арсенале</h2>
+      <p class="section-lead">Бот выбирает приём под задачу и говорит, какой именно взял. Полный список всегда под рукой: /techniques.</p>
+      <ul class="card-grid">
+          {{TECHNIQUES}}
+      </ul>
+    </section>
+
+    <section class="wrap commands" aria-labelledby="cmd-title">
+      <h2 id="cmd-title">Команды</h2>
+      <ul class="command-list">
+          {{COMMANDS}}
+      </ul>
+      <p class="section-lead">Можно просто писать текстом или отправлять голосовые: бот поймёт тему и без команд.</p>
+    </section>
+
+    <section class="wrap note" aria-labelledby="note-title">
+      <h2 id="note-title">Честно о границах</h2>
+      <p>Идеи бота — это гипотезы, а не гарантии: проверяй их дешёвым способом, прежде чем вкладывать деньги и время. Бот не выдумывает факты и ссылки и прямо говорит, если не уверен, что подобное уже существует.</p>
+      <p>Сайт ничего о тебе не собирает: без cookies, аналитики и регистрации. Искры на этой странице бросаются на сервере и ни к кому не привязаны.</p>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    <span>{{PRODUCT_NAME}}</span>
+    <span>бот для придумывания идей</span>
+  </footer>
+</body>
+</html>
