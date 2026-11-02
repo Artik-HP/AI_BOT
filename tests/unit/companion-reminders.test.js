@@ -8,6 +8,85 @@ const { executeTool } = require("../../src/companion/tools");
 const { START, createWorld } = require("../helpers/companionFixtures");
 
 const MINUTE = 60000;
+
+test("напоминание, отменённое во время проверки допуска, не доставляется", async () => {
+  const world = createWorld();
+  const { sent, send } = recorder();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const reminder = remind(world.ctxFor("9"), "отменённое дело", 1);
+  const scheduler = createReminderScheduler({ store: world.store, send, isAllowed: () => gate });
+  const delivery = scheduler.tick(START + 2 * MINUTE);
+
+  assert.equal(cancelReminders(world.store, "9", "9", reminder.id), 1);
+  release(true);
+  assert.equal(await delivery, 0);
+  assert.deepEqual(sent, []);
+});
+
+test("Искра дня: выключение во время проверки допуска отменяет ожидающую доставку", async () => {
+  const world = createWorld();
+  const delivered = [];
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const at = Date.UTC(2026, 10, 2, 9);
+
+  setDaily(world.store, { chatId: "9", userId: "9", time: "09:00", timeZone: "" }, at - MINUTE);
+  const scheduler = createReminderScheduler({ store: world.store, send: async () => {}, isAllowed: () => gate,
+    deliverDaily: async (entry) => { delivered.push(entry); } });
+  const delivery = scheduler.tick(at);
+
+  assert.equal(cancelDaily(world.store, "9"), true);
+  release(true);
+  assert.equal(await delivery, 0);
+  assert.deepEqual(delivered, []);
+  assert.equal(dailyOf(world.store, "9"), null);
+});
+
+test("Искра дня: новое расписание во время проверки не получает старую доставку", async () => {
+  const world = createWorld();
+  const delivered = [];
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const at = Date.UTC(2026, 10, 2, 9);
+
+  setDaily(world.store, { chatId: "9", userId: "9", time: "09:00", timeZone: "" }, at - MINUTE);
+  const scheduler = createReminderScheduler({ store: world.store, send: async () => {}, isAllowed: () => gate,
+    deliverDaily: async (entry) => { delivered.push(entry); } });
+  const delivery = scheduler.tick(at);
+  const replacement = setDaily(world.store, { chatId: "9", userId: "9", time: "12:00", timeZone: "" }, at);
+
+  release(true);
+  assert.equal(await delivery, 0);
+  assert.deepEqual(delivered, []);
+  assert.deepEqual(dailyOf(world.store, "9"), replacement);
+});
+
+test("Искра дня: завершение старой отправки не меняет новое расписание", async () => {
+  for (const failSend of [false, true]) {
+    const world = createWorld();
+    let release;
+    let started;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const sending = new Promise((resolve) => { started = resolve; });
+    const at = Date.UTC(2026, 10, 2, 9);
+
+    setDaily(world.store, { chatId: "9", userId: "9", time: "09:00", timeZone: "" }, at - MINUTE);
+    const scheduler = createReminderScheduler({ store: world.store, send: async () => {}, deliverDaily: async () => {
+      started();
+      await gate;
+      if (failSend) throw new Error("synthetic send error");
+    } });
+    const delivery = scheduler.tick(at);
+
+    await sending;
+    const replacement = setDaily(world.store, { chatId: "9", userId: "9", time: "12:00", timeZone: "" }, at);
+
+    release();
+    assert.equal(await delivery, failSend ? 0 : 1);
+    assert.deepEqual(dailyOf(world.store, "9"), replacement, "ни успех, ни ошибка старой доставки не переписывают новое время");
+  }
+});
 const remind = (ctx, text, minutes) => executeTool("reminder_create", { text, in_minutes: minutes }, ctx);
 
 function recorder() {

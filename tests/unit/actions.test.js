@@ -7,6 +7,27 @@ const { createActionRegistry, ideaMarkers, ideaReplyRows, PREFIX } = require("..
 const row = (...labels) => labels.map((label) => ({ text: label, data: { label } }));
 const tokensOf = (keyboard) => keyboard.markup.inline_keyboard.flat().map((button) => button.callback_data);
 
+test("реестр кнопок освобождает записи клавиатур после истечения и вытеснения всех их токенов", () => {
+  let now = 0;
+  const registry = createActionRegistry({ now: () => now, ttlMs: 1000, maxTokens: 2 });
+  const create = (chatId) => registry.create({ chatId, userId: 1, kind: "ideas", rows: [row("a")] });
+  const expired = create(1);
+
+  expired.attach(101);
+  now = 1000;
+  assert.equal(registry.resolve(tokensOf(expired)[0]), null);
+  assert.equal(create(1).previousMessageId, null, "истёкшая клавиатура больше не хранит сообщение");
+
+  const evicted = create(2);
+
+  evicted.attach(202);
+  create(3);
+  create(4);
+  assert.equal(registry.resolve(tokensOf(evicted)[0]), null);
+  assert.equal(create(2).previousMessageId, null, "вытеснение токенов освобождает и запись клавиатуры");
+  assert.equal(registry.size, 2);
+});
+
 test("реестр кнопок: callback_data — act:<токен> не длиннее 64 байт; токен знает чат, человека, вид, данные и сообщение", () => {
   const registry = createActionRegistry();
   const keyboard = registry.create({ chatId: -100500, userId: 7, kind: "ideas", rows: [row("Развей 1", "Развей 2")] });

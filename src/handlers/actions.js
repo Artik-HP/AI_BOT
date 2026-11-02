@@ -46,6 +46,12 @@ function createActionRegistry({ now = Date.now, ttlMs = TTL_MS, maxTokens = MAX_
     while (tokens.size > maxTokens) {
       tokens.delete(tokens.keys().next().value);
     }
+
+    // A retired token must not leave its keyboard (and message id) in memory forever.
+    for (const [key, keyboard] of keyboards) {
+      keyboard.tokens = keyboard.tokens.filter((token) => tokens.has(token));
+      if (!keyboard.tokens.length) keyboards.delete(key);
+    }
   }
 
   // `rows` is [[{ text, data }]]. The keyboard is bound to the message by attach(message_id) once it is sent;
@@ -53,6 +59,7 @@ function createActionRegistry({ now = Date.now, ttlMs = TTL_MS, maxTokens = MAX_
   // tied to the session it was shown in; `anySession` (the daily spark, sent while the person is usually not logged
   // in) only needs a valid login at the press, and a logout still retires it.
   function create({ chatId, userId, kind, rows, anySession = false }) {
+    prune();
     const key = `${chatId}:${userId}:${kind}`;
     const previous = retire(key);
     const keyboard = { tokens: [], messageId: null };

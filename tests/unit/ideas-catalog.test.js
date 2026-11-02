@@ -282,6 +282,17 @@ test("пулы, из которых не собрать и двух ингред
   }
 });
 
+test("composeSpark: без пула областей искра отклоняется, даже если остальные ингредиенты доступны", () => {
+  const withoutDomain = Object.fromEntries(Object.entries(SPARK_POOLS).filter(([name]) => name !== "domains"));
+
+  for (const pools of [withoutDomain, { ...SPARK_POOLS, domains: [] }]) {
+    for (const shape of SPARK_SHAPES) {
+      assert.throws(() => composeSpark(pools, firstThen(0), { shape: shape.name }), /SPARK_POOLS_TOO_SMALL/, shape.name);
+    }
+    assert.throws(() => composeSpark(pools, firstThen(0)), /SPARK_POOLS_TOO_SMALL/);
+  }
+});
+
 test("карточка из четырёх ингредиентов: подписи в порядке формы, «Для кого» среди них", () => {
   const widest = SPARK_SHAPES.reduce((best, shape) => (shape.ingredients.length > best.ingredients.length ? shape : best));
   const lines = formatSpark(composeSpark(SPARK_POOLS, firstThen(ROLL_START.get(widest)))).split("\n");

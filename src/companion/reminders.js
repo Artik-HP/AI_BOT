@@ -159,7 +159,7 @@ function createAccessCheck({ allowed = isUserAllowed, database = () => require("
 // The daily spark (/daily): one entry per person in data.daily — { chatId, userId, time "HH:MM", timeZone, nextAt,
 // tries } — in the same file as reminders, so it survives restarts. Only a private chat has one.
 function setDaily(store, { chatId, userId, time, timeZone }, now) {
-  const entry = { chatId: String(chatId), userId: String(userId), time, timeZone: timeZone || "", nextAt: nextDailyMoment(time, timeZone, now), tries: 0, createdAt: now };
+  const entry = { id: crypto.randomBytes(8).toString("hex"), chatId: String(chatId), userId: String(userId), time, timeZone: timeZone || "", nextAt: nextDailyMoment(time, timeZone, now), tries: 0, createdAt: now };
 
   store.change((data) => {
     data.daily[entry.userId] = entry;
@@ -214,12 +214,19 @@ function createReminderScheduler({ store, send, deliverDaily = null, isAllowed =
     }
   }
 
-  // `next(current)` returns the new entry, or null to remove it; an entry switched off meanwhile stays off.
-  function updateDaily(userId, next) {
+  // Old files have no id. Compare their schedule too, so both old and new records survive a reschedule during I/O.
+  function sameDaily(current, expected) {
+    return Boolean(current) && current.id === expected.id && current.createdAt === expected.createdAt &&
+      current.nextAt === expected.nextAt && current.time === expected.time && current.timeZone === expected.timeZone;
+  }
+
+  // Only the delivered revision may be advanced or retried; a new subscription keeps its own state.
+  function updateDaily(entry, next) {
     store.change((data) => {
+      const userId = entry.userId;
       const current = data.daily[userId];
 
-      if (current) {
+      if (sameDaily(current, entry)) {
         const value = next(current);
 
         if (value) {
@@ -243,6 +250,8 @@ function createReminderScheduler({ store, send, deliverDaily = null, isAllowed =
     for (const entry of due) {
       const verdict = await admission(entry.userId);
 
+      if (!store.view((data) => sameDaily(data.daily[entry.userId], entry))) continue;
+
       if (verdict === null) {
         noteUnknown(at);
         continue;
@@ -250,17 +259,17 @@ function createReminderScheduler({ store, send, deliverDaily = null, isAllowed =
 
       if (!verdict) {
         logger.info("A daily spark was switched off: the person no longer has access.");
-        updateDaily(entry.userId, () => null);
+        updateDaily(entry, () => null);
         continue;
       }
 
       try {
         await deliverDaily(entry);
-        updateDaily(entry.userId, tomorrow);
+        updateDaily(entry, tomorrow);
         delivered += 1;
       } catch (error) {
         logger.warn("Daily spark delivery failed:", error);
-        updateDaily(entry.userId, (current) => (current.tries + 1 >= MAX_TRIES ? tomorrow(current) : { ...current, tries: current.tries + 1, nextAt: at + RETRY_DELAY_MS }));
+        updateDaily(entry, (current) => (current.tries + 1 >= MAX_TRIES ? tomorrow(current) : { ...current, tries: current.tries + 1, nextAt: at + RETRY_DELAY_MS }));
       }
     }
 
@@ -318,6 +327,9 @@ function createReminderScheduler({ store, send, deliverDaily = null, isAllowed =
 
       for (const item of due) {
         const verdict = await admission(item.userId);
+
+        // Cancellation (including deletion of its idea) may have happened while the database was answering.
+        if (!store.view((data) => data.reminders.some((current) => current.id === item.id))) continue;
 
         if (verdict === null) {
           noteUnknown(at);

@@ -13,6 +13,25 @@ const call = (ctx, name, args) => executeTool(name, JSON.stringify(args), ctx);
 const reminders = (world) => world.store.view((data) => data.reminders);
 const COFFEE = { title: "Кофейня-библиотека", pitch: "Читаешь книгу — платишь меньше за кофе.", next_step: "Поговорить с хозяином кофейни" };
 
+test("L1: удаление идеи во время проверки допуска отменяет и ожидающую отправку её напоминания", async () => {
+  const world = createWorld();
+  const me = world.ctxFor("1", "1");
+  const { id } = call(me, "idea_save", COFFEE);
+  const sent = [];
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+
+  call(me, "reminder_create", { text: "сделать первый шаг", in_minutes: 1, idea_id: id });
+  const scheduler = createReminderScheduler({ store: world.store, send: async (_, text) => { sent.push(text); }, isAllowed: () => gate });
+  const delivery = scheduler.tick(START + 2 * MINUTE);
+
+  assert.equal(call(me, "idea_update", { id, delete: true }).reminders_cancelled, 1);
+  release(true);
+  assert.equal(await delivery, 0);
+  assert.deepEqual(sent, []);
+  assert.deepEqual(reminders(world), []);
+});
+
 test("L1: reminder_create с idea_id — код в любом виде; чужая, несуществующая и мусорная идея — idea_not_found с подсказкой, без следов", () => {
   const world = createWorld();
   const me = world.ctxFor("1", "1");
