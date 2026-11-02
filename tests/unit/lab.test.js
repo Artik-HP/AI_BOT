@@ -32,6 +32,23 @@ test("lab: idea → plan → project survives reload and is private", async (t) 
   assert.throws(() => service.data({ chatId: 500, userId: 501 }), /PRIVATE_ONLY/);
 });
 
+test("lab revokeUser: снимает сессию и кнопки, а человеку без данных не заводит пустую запись в файле", (t) => {
+  const { service, store } = setup(t);
+  const lab = new LabTelegram({}, service);
+  const scopes = () => Object.keys(JSON.parse(fs.readFileSync(store.filename, "utf8")).scopes);
+
+  service.saveProject(ctx, fixtures.idea);
+  store.change(ctx, (scope) => { scope.session = { active: true, trackId: null }; scope.view = "v"; scope.callbacks = [{ id: id(), expires: Date.now() + 60000 }]; });
+  lab.revokeUser(777);
+  lab.revokeUser(778);
+  assert.deepEqual(scopes(), [`${ctx.chatId}:${ctx.userId}`], "выход и вход тех, кто лабораторию не открывал, файл не растят");
+
+  lab.revokeUser(ctx.userId);
+  lab.revokeUser(ctx.userId);
+  assert.deepEqual([service.data(ctx).session, service.data(ctx).view, service.data(ctx).callbacks], [null, null, []]);
+  assert.equal(service.data(ctx).projects.length, 1, "проекты не трогаются");
+});
+
 test("lab store: second writer blocked; malformed primary recovered with original preserved", (t) => {
   const { store } = setup(t);
   store.change(ctx, (scope) => { scope.projects.push({ id: id(), title: "first" }); });

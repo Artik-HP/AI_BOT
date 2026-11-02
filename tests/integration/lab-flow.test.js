@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const { withApp, launchApp, waitReady } = require("../helpers/app");
 const fixtures = require("../helpers/labFixtures");
+const { callsThen } = require("../helpers/ideasChat");
 const USER = 9800;
 const ENV = { BOT_OWNER_CHAT_ID: String(USER) };
 const ctxKey = `${USER}:${USER}`;
@@ -173,6 +174,153 @@ test("lab Telegram: HTML and Node file delivery, malformed/truncated reply is no
     await tg.waitFor(() => tg.texts().some((text) => text.includes("Ответ модели не завершён")));
     assert.equal(tg.sent("sendDocument").length, 2);
     assert.equal(state(app).artifacts.length, 2);
+  });
+});
+
+test("U6: план первой версии и примеры инструмента — читаемым текстом, без JSON; экспорт проекта по-прежнему JSON", async () => {
+  await withApp({ env: ENV }, async ({ tg, or, app }) => {
+    or.chat = (record) => {
+      const system = record.body.messages[0].content;
+
+      if (system.includes('"ideas"')) return fixtures.response(fixtures.ideas);
+      return fixtures.response(system.includes("{kind,code") ? fixtures.artifact("html") : fixtures.plan);
+    };
+    await say(tg, app, "/lab");
+    await choose(tg, app, "ideas");
+    await say(tg, app, "Магазин, JavaScript, выходные"); await finish(tg, app);
+    await choose(tg, app, "idea", 0);
+    await choose(tg, app, "plan"); await finish(tg, app);
+
+    const planScreen = tg.texts().filter((text) => text.includes("Калькулятор цены")).at(-1);
+
+    assert.doesNotMatch(planScreen, /[{}]|"input"|"tasks"/, planScreen);
+    assert.match(planScreen, /\nВход: 100,20\nОбработка: base\*\(1\+margin\/100\)\nРезультат: 120\nЗадачи:\n1\. Сделать форму\nКритерии приёмки:\n1\. 100\+20%=120\nДемо: Ввести 100,20$/);
+
+    await choose(tg, app, "save");
+    const exportButton = action(app, "export");
+    tg.callback({ chatId: USER, data: `lab:${exportButton.id}`, messageId: exportButton.messageId });
+    await tg.waitFor(() => tg.sent("sendDocument").length === 1);
+    assert.equal(JSON.parse(tg.sent("sendDocument")[0].document.content).project.plan.output, "120", "экспорт не изменился");
+
+    await choose(tg, app, "home"); await choose(tg, app, "tools"); await choose(tg, app, "tool_kind", "html");
+    await say(tg, app, "Себестоимость 100, наценка 20%, результат 120");
+    await choose(tg, app, "tool_generate"); await finish(tg, app);
+
+    const toolScreen = tg.texts().filter((text) => text.startsWith("Файл сформирован")).at(-1);
+
+    assert.match(toolScreen, /\nПримеры:\n100,20 → 120\n50,0 → 50\n/);
+    assert.doesNotMatch(toolScreen, /\[\{|"input"/);
+  });
+});
+
+const bankOf = (app) => {
+  try { return JSON.parse(fs.readFileSync(`${app.memoryFile}.rpg.json`, "utf8")).ideas[ctxKey] || []; }
+  catch { return []; }
+};
+const userRequest = (record) => record.body.messages.at(-1).content;
+
+test("L2: «📚 В банк идей» без AI кладёт идею лаборатории в банк; /lab код — одна генерация только после кнопки", async () => {
+  await withApp({ env: ENV }, async ({ tg, or, app }) => {
+    or.chat = (record) => fixtures.response(record.body.messages[0].content.includes('"ideas"') ? fixtures.ideas : fixtures.plan);
+    await say(tg, app, "/lab");
+    await choose(tg, app, "ideas");
+    await say(tg, app, "Магазин, JavaScript, выходные"); await finish(tg, app);
+    await choose(tg, app, "idea", 0);
+
+    const requests = or.chatRequests().length;
+
+    await choose(tg, app, "to_bank");
+    assert.equal(or.chatRequests().length, requests, "в банк — без запроса к модели");
+
+    const [saved] = bankOf(app);
+
+    assert.deepEqual([saved.title, saved.tags, saved.next], ["Калькулятор цены", ["лаборатория"], "Ввод"]);
+    assert.equal(saved.pitch, "Рассчитать цену по себестоимости Результат: 120");
+    assert.ok(tg.texts().at(-1).includes(`код ${saved.id}`), tg.texts().at(-1));
+
+    await choose(tg, app, "idea_back");
+    assert.match(tg.texts().at(-1), /^Калькулятор цены\n/, "назад к выбранной идее");
+
+    tg.message({ chatId: USER, text: "/ideas" });
+    await tg.waitFor(() => tg.texts().some((text) => text.startsWith("📚 Твои идеи (1)") && text.includes("Калькулятор цены")));
+    assert.match(tg.texts().find((text) => text.startsWith("📚 Твои идеи (1)")), /\nВ лабораторию: \/lab код/);
+
+    await say(tg, app, `/lab #${saved.id.toUpperCase()}`);
+    assert.match(tg.texts().at(-1), /^Идея из банка: «Калькулятор цены»\n[\s\S]*Это 1 генерация лаборатории\.$/);
+    assert.equal(or.chatRequests().length, requests, "показ идеи — без запроса");
+
+    await choose(tg, app, "bank_ideas"); await finish(tg, app);
+    assert.equal(or.chatRequests().length, requests + 1, "ровно одна генерация");
+    assert.match(userRequest(or.chatRequests().at(-1)), /Идея: Калькулятор цены/);
+    assert.equal(state(app).callbacks.filter((cb) => cb.action === "idea").length, 3, "дальше — обычный экран трёх идей");
+
+    await say(tg, app, "/lab deadbeef");
+    assert.match(tg.texts().at(-1), /^Идеи с кодом deadbeef нет в твоём банке/);
+    await say(tg, app, "/lab что-то");
+    assert.match(tg.texts().at(-1), /^Не понял код идеи/);
+    assert.equal(or.chatRequests().length, requests + 1);
+  });
+});
+
+test("L2: «🎲 Искра» на экране идей программ — бросает код, запрос к AI только после подтверждения и со значениями искры", async () => {
+  await withApp({ env: ENV }, async ({ tg, or, app }) => {
+    or.chat = () => fixtures.response(fixtures.ideas);
+    await say(tg, app, "/lab");
+    await choose(tg, app, "ideas");
+    await choose(tg, app, "lab_spark");
+
+    const card = tg.texts().at(-1);
+    const values = card.split("\n").filter((line) => /^(Область|Ограничение|Поворот|Для кого): /.test(line));
+
+    assert.match(card, /^🎲 Искра\nОбласть: /);
+    assert.match(card, /Сделать три идеи программ вокруг этой искры\? 1 генерация\.$/);
+    assert.ok(values.length >= 2);
+    assert.equal(or.chatRequests().length, 0, "до подтверждения — ни одного запроса");
+
+    await choose(tg, app, "spark_ideas"); await finish(tg, app);
+    assert.equal(or.chatRequests().length, 1);
+
+    for (const line of values) {
+      assert.ok(userRequest(or.chatRequests()[0]).includes(line), `в запросе нет «${line}»`);
+    }
+  });
+});
+
+test("L2: без функций модели кнопки «В банк идей» нет; без лаборатории в /ideas нет подсказки про /lab", async () => {
+  await withApp({ env: { ...ENV, COMPANION_TOOLS_ENABLED: "false" } }, async ({ tg, or, app }) => {
+    or.chat = () => fixtures.response(fixtures.ideas);
+    await say(tg, app, "/lab");
+    await choose(tg, app, "ideas");
+    await say(tg, app, "Магазин"); await finish(tg, app);
+    await choose(tg, app, "idea", 0);
+    assert.ok(!state(app).callbacks.some((cb) => cb.action === "to_bank"));
+    assert.ok(state(app).callbacks.some((cb) => cb.action === "plan"), "остальные кнопки на месте");
+  });
+
+  await withApp({ env: { ...ENV, AI_LAB_ENABLED: "false", COMPANION_DEFAULT_PERSONA: undefined } }, async ({ tg, or }) => {
+    callsThen(or, [["idea_save", { title: "Будильник-вопрос", pitch: "Будит вопросом на пять секунд." }]], "Сохранил");
+    tg.message({ chatId: USER, text: "сохрани" });
+    await tg.waitFor(() => tg.texts().includes("Сохранил"));
+    tg.message({ chatId: USER, text: "/ideas" });
+    await tg.waitFor(() => tg.texts().some((text) => text.startsWith("📚 Твои идеи (1)")));
+    assert.ok(!tg.texts().at(-1).includes("/lab"), tg.texts().at(-1));
+  });
+});
+
+test("lifecycle: /logout снимает сессию и кнопки лаборатории; после нового входа обычный текст идёт в чат, а не в лабораторию", async () => {
+  await withApp({ env: ENV }, async ({ tg, or, app }) => {
+    or.chat = () => fixtures.response("обычный ответ");
+    await say(tg, app, "/lab");
+    assert.equal(state(app).session.active, true);
+
+    tg.message({ chatId: USER, text: "/logout" });
+    await tg.waitFor(() => tg.texts().some((text) => text.includes("Вы вышли")));
+    await tg.waitFor(() => state(app).session === null, 4000, "сессия лаборатории снята");
+    assert.deepEqual([state(app).view, state(app).callbacks], [null, []]);
+
+    await app.authenticate(USER);
+    tg.message({ chatId: USER, text: "обычный вопрос" });
+    await tg.waitFor(() => tg.texts().includes("обычный ответ"));
   });
 });
 

@@ -1,11 +1,21 @@
 const crypto = require("crypto");
 const CONFIG = require("./config");
 const { auth } = require("./services/auth");
-const { getDatabase } = require("./database");
+const { accountState, getDatabase } = require("./database");
 const { isOwner } = require("./services/access");
 const { admitMessage, admitCallback, messageAuthorized } = require("./handlers/guard");
 const { isAddressedToThisBot } = require("./services/telegram");
 const { safeHandler } = require("./utils/safe");
+const { formatTime } = require("./utils/time");
+
+// What /me says. A person without a row is not blocked (blocking is an explicit record), as for reminder delivery.
+function describeAccess(account) {
+  const state = accountState(account);
+
+  if (state === "blocked") return "отключён";
+  if (state === "expired") return "срок истёк";
+  return account?.until ? `активен до ${formatTime(account.until, CONFIG.BOT_TIMEZONE)}` : "активен, без срока";
+}
 
 function registerAccounts(bot, database = getDatabase) {
   const confirmations = new Map();
@@ -23,9 +33,9 @@ function registerAccounts(bot, database = getDatabase) {
     if (!await admitMessage(bot, msg)) return;
     await run(msg.chat.id, async (db) => {
       if (command === "me") {
-        const allowed = await db.allowed(msg.from.id);
+        const account = await db.account(msg.from.id);
         if (!messageAuthorized(msg)) return;
-        await bot.sendMessage(msg.chat.id, `Мой доступ: ${allowed ? "активен" : "отключён или истёк"}.\nСессия ограничена по времени. /logout — выйти.`);
+        await bot.sendMessage(msg.chat.id, `Мой доступ: ${describeAccess(account)}.\nСессия ограничена по времени. /logout — выйти.`);
       } else if (command === "users") {
         const users = await db.users();
         if (!messageAuthorized(msg)) return;
@@ -68,4 +78,4 @@ function registerAccounts(bot, database = getDatabase) {
   return { close: async () => { if (CONFIG.DATABASE_URL) await database()?.close(); } };
 }
 
-module.exports = { registerAccounts };
+module.exports = { registerAccounts, describeAccess };

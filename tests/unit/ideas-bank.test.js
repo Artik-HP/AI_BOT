@@ -207,6 +207,25 @@ test("idea_list: новые сверху; запрос ищет по слова�
   }
 });
 
+test("idea_list: «ё» и «е» в поиске одно и то же — в обе стороны, в названии, сути и тегах (как при сохранении)", () => {
+  const world = createWorld();
+  const ctx = world.ctxFor("1", "1");
+  const found = (query) => titles(call(ctx, "idea_list", { query }));
+
+  call(ctx, "idea_save", idea("Ёлочная ярмарка во дворе"));
+  call(ctx, "idea_save", idea("Еще одна лавка у метро"));
+  call(ctx, "idea_save", { title: "Зимний рынок", pitch: "Продаём живые ёлки и горячий чай.", tags: ["ёлка"] });
+  call(ctx, "idea_save", { title: "Обмен вещами", pitch: "Соседи меняются вещами раз в неделю.", tags: ["еженедельно"] });
+
+  assert.deepEqual(found("елочная"), ["Ёлочная ярмарка во дворе"], "«е» находит «ё» в названии");
+  assert.deepEqual(found("ЕЩЁ"), ["Еще одна лавка у метро"], "«ё» находит «е» в названии");
+  assert.deepEqual(found("елки"), ["Зимний рынок"], "«е» находит «ё» в сути");
+  assert.deepEqual(found("продаем"), ["Зимний рынок"], "и в начале слова");
+  assert.deepEqual(found("елка"), ["Зимний рынок"], "«е» находит «ё» в теге");
+  assert.deepEqual(found("ёженедельно"), ["Обмен вещами"], "«ё» находит «е» в теге");
+  assert.deepEqual(found("ярмарка"), ["Ёлочная ярмарка во дворе"], "прежний поиск не изменился");
+});
+
 test("idea_update: статус, правка, очистка тегов, удаление; код без учёта регистра; чужой код не находится", () => {
   const world = createWorld();
   const ctx = world.ctxFor("1", "1");

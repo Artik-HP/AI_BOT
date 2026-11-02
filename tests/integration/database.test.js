@@ -20,13 +20,23 @@ test("PostgreSQL SQL: migrations, accounts, access audit and rollback on embedde
   try {
     await db.migrate(); await db.migrate();
     assert.equal((await engine.query("SELECT count(*)::int AS n FROM ai_bot.migrations")).rows[0].n, 1);
+    assert.equal(await db.account(100), null, "строки ещё нет");
+    assert.equal((await engine.query("SELECT count(*)::int AS n FROM ai_bot.users")).rows[0].n, 0, "чтение не создаёт строку");
     assert.equal((await db.checkAccount(100)).allowed, true);
+    assert.deepEqual(await db.account(100), { status: "active", until: null });
+    const stamp = (await engine.query("SELECT last_login_at FROM ai_bot.users WHERE telegram_id = '100'")).rows[0].last_login_at;
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    await db.account(100);
+    assert.deepEqual((await engine.query("SELECT last_login_at FROM ai_bot.users WHERE telegram_id = '100'")).rows[0].last_login_at, stamp, "account() без побочных эффектов");
     assert.equal((await db.users()).length, 1);
     await db.setAccess(999, 100, "blocked");
     assert.equal(await db.allowed(100), false);
     assert.equal((await db.checkAccount(100)).allowed, false);
-    await db.setAccess(999, 100, "active", new Date(Date.now() + 60000).toISOString());
+    assert.equal((await db.account(100)).status, "blocked");
+    const until = new Date(Date.now() + 60000).toISOString();
+    await db.setAccess(999, 100, "active", until);
     assert.equal(await db.allowed(100), true);
+    assert.deepEqual(await db.account(100), { status: "active", until });
     assert.equal((await engine.query("SELECT count(*)::int AS n FROM ai_bot.access_events")).rows[0].n, 2);
     await assert.rejects(db.setAccess(999, "100; DROP SCHEMA ai_bot", "active"), /INVALID/);
     await assert.rejects(db.setAccess(999, 100, "administrator"), /INVALID/);
@@ -43,6 +53,59 @@ test("PostgreSQL SQL: migrations, accounts, access audit and rollback on embedde
     assert.equal(auth.authenticated(102), false);
     await db.health();
   } finally { await db.close(); }
+});
+
+test("D3: подтверждение /access … blocked доходит до хуков отзыва lifecycle — тем же путём, что /logout", async () => {
+  const fakeDb = { setAccess: async () => {}, users: async () => [], allowed: async () => true };
+  const { registerAccounts } = loadFresh("accounts", { BOT_OWNER_CHAT_ID: "999", BOT_PASSWORD_HASH: TEST_PASSWORD_HASH, DATABASE_URL: "" });
+  const { auth, setRevokeHandler } = require("../../src/services/auth");
+  const lifecycle = require("../../src/lifecycle");
+  const revoked = [];
+
+  lifecycle.registerModule("spy", { revokeUser: (userId) => { revoked.push(String(userId)); } });
+  // The same wiring as start() in src/bot.js.
+  setRevokeHandler((userId) => lifecycle.revokeUser(userId));
+  await auth.authenticate(999, TEST_PASSWORD); await auth.authenticate(100, TEST_PASSWORD);
+
+  const bot = createFakeBot(); registerAccounts(bot, () => fakeDb);
+
+  await bot.text(999, "/access 100 blocked");
+  const data = bot.sent.at(-1).options.reply_markup.inline_keyboard[0][0].callback_data;
+
+  await bot.callback(999, data, 999, bot.sent.length);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(revoked, ["100"]);
+  assert.equal(auth.authenticated(100), false);
+});
+
+test("U4: /me показывает срок доступа — «активен до …», «активен, без срока», «отключён», «срок истёк»; время по BOT_TIMEZONE", async () => {
+  const rows = {
+    100: { status: "active", until: "2099-12-01T09:00:00.000Z" },
+    101: { status: "active", until: null },
+    102: { status: "blocked", until: null },
+    103: { status: "active", until: "2000-01-01T00:00:00.000Z" }
+  };
+  const fakeDb = { account: async (userId) => rows[userId] ?? null, allowed: async () => { throw new Error("/me reads account()"); } };
+  // One fresh load per time zone: every load of the modules adds process listeners of its own.
+  const boot = (env) => {
+    const { registerAccounts } = loadFresh("accounts", { BOT_PASSWORD_HASH: TEST_PASSWORD_HASH, DATABASE_URL: "", ...env });
+    const { auth } = require("../../src/services/auth");
+    const bot = createFakeBot();
+
+    registerAccounts(bot, () => fakeDb);
+    return async (userId) => {
+      await auth.authenticate(userId, TEST_PASSWORD);
+      await bot.text(userId, "/me");
+      return bot.lastText();
+    };
+  };
+  const me = boot({ BOT_TIMEZONE: undefined });
+
+  assert.equal(await me(100), "Мой доступ: активен до 2099-12-01 09:00 UTC.\nСессия ограничена по времени. /logout — выйти.");
+  assert.match(await me(101), /^Мой доступ: активен, без срока\./);
+  assert.match(await me(102), /^Мой доступ: отключён\./);
+  assert.match(await me(103), /^Мой доступ: срок истёк\./);
+  assert.match(await boot({ BOT_TIMEZONE: "Europe/Kyiv" })(100), /^Мой доступ: активен до 2099-12-01 11:00 Europe\/Kyiv\./);
 });
 
 test("commercial accounts: role, confirmation binding, access revocation and stale admin buttons", async () => {

@@ -25,6 +25,17 @@ test("buildConfig: значения по умолчанию без предуп�
   assert.deepEqual(config.BOT_ALLOWED_USER_IDS, []);
 });
 
+test("BOT_TIMEZONE: имя IANA принимается, неверное — предупреждение и пусто (UTC), пустое — пусто без предупреждения", () => {
+  assert.deepEqual([build({ BOT_TIMEZONE: " Europe/Kyiv " }).config.BOT_TIMEZONE, build({ BOT_TIMEZONE: "Europe/Kyiv" }).warnings], ["Europe/Kyiv", []]);
+  assert.equal(build().config.BOT_TIMEZONE, "");
+
+  const wrong = build({ BOT_TIMEZONE: "Kyiv+3" });
+
+  assert.equal(wrong.config.BOT_TIMEZONE, "");
+  assert.equal(wrong.warnings.length, 1);
+  assert.match(wrong.warnings[0], /BOT_TIMEZONE.*Europe\/Kyiv/);
+});
+
 test("буквально '25MB' больше не превращается в NaN и не отключает лимит (F022)", () => {
   const { config, warnings } = build({ MAX_AUDIO_BYTES: "25MB", MAX_IMAGE_BYTES: "512 KB" });
 

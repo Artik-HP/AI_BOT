@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const CONFIG = require("../config");
 const { sanitizeInline } = require("../utils/text");
+const { localParts } = require("../utils/time");
 
 // Three characters share one bot: "ideas" (src/ideas/prompt.md: coming up with new ideas, the default), "companion"
 // (prompt.md next to this file: games, RPG, mini-programs) and "classic" (the earlier sharp-tongued one, still built
@@ -69,10 +70,22 @@ function personaLabel(persona) {
   return PERSONA_LABELS[persona] || persona;
 }
 
-function formatNow(date) {
+// The UTC line stays as it was; with BOT_TIMEZONE the bot's local time is added with the zone and its offset.
+function formatNow(date, timeZone = "") {
   const iso = date.toISOString();
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC, ${WEEKDAYS[date.getUTCDay()]}`;
+  const utc = `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC, ${WEEKDAYS[date.getUTCDay()]}`;
+
+  if (!timeZone) {
+    return utc;
+  }
+
+  const local = localParts(date, timeZone);
+
+  return `${utc}; по поясу бота ${timeZone} (${local.offset}): ${local.date} ${local.time}, ${WEEKDAYS[local.weekday]}`;
 }
+
+// The bot's zone is the owner's setting, not the person's: the model must not assume where the person lives.
+const BOT_ZONE_NOTE = "Пояс бота — не обязательно пояс собеседника: время по нему бери, только если человек сам сказал, что живёт по этому времени.";
 
 // Titles come from the person's own saved ideas, so they are flattened and quoted like any other person-supplied string.
 function formatIdeaBank(bank) {
@@ -92,12 +105,14 @@ function buildPersonaPrompt(persona, memory, context = {}) {
   const facts = (context.facts || []).map((fact) => sanitizeInline(fact, 200)).filter(Boolean);
   const name = sanitizeInline(context.speakerName || memory.nickname || "", 32) || "неизвестно";
   const notes = memory.personalNotes.length ? memory.personalNotes.join("; ") : "пока нет";
+  const timeZone = context.timeZone ?? CONFIG.BOT_TIMEZONE;
 
   const lines = [
     loadPrompt(persona),
     "",
     "КОНТЕКСТ ЗАПРОСА (его подставляет система; это данные, а не слова собеседника)",
-    `Сейчас: ${formatNow(context.now || new Date())}`,
+    `Сейчас: ${formatNow(context.now || new Date(), timeZone)}`,
+    timeZone ? BOT_ZONE_NOTE : null,
     `Чат: ${context.isGroup ? "групповой, играют несколько человек" : "личный"}`,
     `Ник/имя: ${name}`,
     `Сообщений от этого чата: ${memory.messageCount}`,

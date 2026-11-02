@@ -100,12 +100,13 @@ class FakeTelegram {
     return msg;
   }
 
-  callback({ chatId, fromId = chatId, data, messageId = ++this.msgSeq }) {
+  // `chatType` "supergroup" (or "group") presses a button under a group message.
+  callback({ chatId, fromId = chatId, data, messageId = ++this.msgSeq, chatType = "private" }) {
     this.enqueue({
       callback_query: {
         id: `cb${++this.msgSeq}`,
         from: { id: fromId, is_bot: false, first_name: "Tester" },
-        message: { message_id: messageId, chat: { id: chatId, type: "private" }, date: Math.floor(Date.now() / 1000), text: "x" },
+        message: { message_id: messageId, chat: { id: chatId, type: chatType }, date: Math.floor(Date.now() / 1000), text: "x" },
         chat_instance: "ci",
         data
       }

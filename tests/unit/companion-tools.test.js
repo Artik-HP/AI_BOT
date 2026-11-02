@@ -188,6 +188,17 @@ test("память: сохранение, поиск по основе слов�
   assert.deepEqual(recall(world.ctxFor("1", "1"), "шахматы").facts, [], "тот же человек в личном чате");
 });
 
+test("память: поиск не различает «ё» и «е», как и сохранение фактов", () => {
+  const world = createWorld();
+  const me = world.ctxFor("1", "1");
+
+  call(me, "memory_save", { text: "Любит ёлочные игрушки" });
+  call(me, "memory_save", { text: "Живет за городом" });
+
+  assert.deepEqual(call(me, "memory_search", { query: "елочные" }).facts, ["Любит ёлочные игрушки"]);
+  assert.deepEqual(call(me, "memory_search", { query: "живёт" }).facts, ["Живет за городом"]);
+});
+
 test("память: пароли, карты, документы и телефоны не сохраняются; обычные факты проходят", () => {
   const ctx = createWorld().ctxFor();
 

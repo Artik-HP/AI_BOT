@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { comparableText } = require("../utils/text");
+const { comparableText, searchText, searchTokens } = require("../utils/text");
 
 // The idea bank: ideas a person decided to keep. They live in the companion store (src/companion/store.js) under
 // data.ideas["<chatId>:<userId>"], exactly like saved facts: private to the person in that chat, so ideas from a
@@ -53,13 +53,9 @@ function newId(list) {
   return id;
 }
 
-// Russian endings vary ("кофейня", "кофейни"), so longer words are compared by their stem.
-function searchTokens(query) {
-  return (query || "").toLowerCase().match(/[\p{L}\p{N}]{2,}/gu)?.map((word) => (word.length > 5 ? word.slice(0, word.length - 2) : word)) || [];
-}
-
+// The query and the idea are normalized by one rule (utils/text.js), so "елка" finds "ёлка" and the other way round.
 function score(idea, tokens) {
-  const haystack = `${idea.title} ${idea.pitch} ${idea.tags.join(" ")}`.toLowerCase();
+  const haystack = searchText(`${idea.title} ${idea.pitch} ${idea.tags.join(" ")}`);
   return tokens.filter((token) => haystack.includes(token)).length;
 }
 
@@ -104,6 +100,19 @@ function addIdea(data, scope, { title, pitch, tags = [], next = "" }, now) {
   return ok({ id: idea.id, saved: true, total: list.length, idea: describeIdea(idea) });
 }
 
+// Reminders tied to ideas that are being deleted go with them, inside the same store.change(): a refused write keeps
+// both the idea and its reminders. Returns how many were cancelled.
+function cancelIdeaReminders(data, scope, ids) {
+  if (!Array.isArray(data.reminders)) {
+    return 0;
+  }
+
+  const before = data.reminders.length;
+
+  data.reminders = data.reminders.filter((item) => !(item.ideaId && ids.includes(item.ideaId) && `${item.chatId}:${item.userId}` === scope));
+  return before - data.reminders.length;
+}
+
 function updateIdea(data, scope, id, changes, remove, now) {
   const list = data.ideas[scope] || [];
   const idea = list.find((entry) => entry.id === id);
@@ -119,7 +128,9 @@ function updateIdea(data, scope, id, changes, remove, now) {
       delete data.ideas[scope];
     }
 
-    return ok({ id, deleted: true });
+    const cancelled = cancelIdeaReminders(data, scope, [id]);
+
+    return ok({ id, deleted: true, ...(cancelled ? { reminders_cancelled: cancelled } : {}) });
   }
 
   const clash = changes.title && list.find((entry) => entry !== idea && titleKey(entry.title) === titleKey(changes.title));
@@ -166,25 +177,70 @@ function listFor(store, chatId, userId, options = {}) {
   return store.view((data) => listIdeas(data, scopeKey(chatId, userId), options));
 }
 
-// Used by "/ideas del код". True when something was removed.
-function removeFor(store, chatId, userId, id) {
-  return store.change((data) => updateIdea(data, scopeKey(chatId, userId), id.toLowerCase(), {}, true, 0)).ok;
+// Used by "/ideas del код": the whole answer, with reminders_cancelled when the idea had reminders.
+function removeIdeaFor(store, chatId, userId, id) {
+  return store.change((data) => updateIdea(data, scopeKey(chatId, userId), id.toLowerCase(), {}, true, 0));
 }
 
-// Used by "/ideas clear". Returns how many ideas were removed.
+// True when something was removed.
+function removeFor(store, chatId, userId, id) {
+  return removeIdeaFor(store, chatId, userId, id).ok;
+}
+
+// Used by "/ideas clear". Returns how many ideas were removed; their reminders go too.
 function clearFor(store, chatId, userId) {
   const result = store.change((data) => {
-    const removed = (data.ideas[scopeKey(chatId, userId)] || []).length;
+    const scope = scopeKey(chatId, userId);
+    const list = data.ideas[scope] || [];
 
-    if (!removed) {
+    if (!list.length) {
       return fail("empty");
     }
 
-    delete data.ideas[scopeKey(chatId, userId)];
-    return ok({ removed });
+    delete data.ideas[scope];
+    cancelIdeaReminders(data, scope, list.map((idea) => idea.id));
+    return ok({ removed: list.length });
   });
 
   return result.ok ? result.removed : 0;
+}
+
+// How many ideas the person keeps in this chat, in total and per status: for /status.
+function countsFor(store, chatId, userId) {
+  return store.view((data) => {
+    const list = data.ideas[scopeKey(chatId, userId)] || [];
+    const counts = Object.fromEntries(IDEA_STATUSES.map((status) => [status, 0]));
+
+    for (const idea of list) {
+      counts[idea.status] = (counts[idea.status] || 0) + 1;
+    }
+
+    return { total: list.length, counts };
+  });
+}
+
+// The chat id of a "<chatId>:<userId>" scope when it belongs to `userId`, or null. Chat ids may be negative (groups).
+function chatOfScope(scope, userId) {
+  const split = scope.lastIndexOf(":");
+
+  return split > 0 && scope.slice(split + 1) === String(userId) ? scope.slice(0, split) : null;
+}
+
+// Every idea of one person, in all chats, for /export: { [chatId]: [idea, …] }, or undefined when there is none.
+function exportFor(store, userId) {
+  return store.view((data) => {
+    const chats = {};
+
+    for (const [scope, list] of Object.entries(data.ideas)) {
+      const chatId = chatOfScope(scope, userId);
+
+      if (chatId !== null && list.length) {
+        chats[chatId] = list.slice().sort((a, b) => b.updatedAt - a.updatedAt).map(describeIdea);
+      }
+    }
+
+    return Object.keys(chats).length ? chats : undefined;
+  });
 }
 
 // What goes into the prompt without a tool call: how many ideas there are and the latest titles.
@@ -212,7 +268,11 @@ module.exports = {
   updateIdea,
   listIdeas,
   listFor,
+  removeIdeaFor,
   removeFor,
   clearFor,
+  countsFor,
+  chatOfScope,
+  exportFor,
   digestFor
 };

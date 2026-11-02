@@ -92,6 +92,18 @@ function comparableText(value) {
   return key || source;
 }
 
+// The form a searched text is compared in: lower case, "ё" as "е". Saving already compares titles and facts through
+// comparableText, so searching must not tell "ёлка" from "елка" either.
+function searchText(value) {
+  return String(value ?? "").toLowerCase().replace(/ё/g, "е");
+}
+
+// The words of a search query: letters and digits from two characters on. Russian endings vary ("кофейня",
+// "кофейни"), so a word longer than five characters is looked up by its stem without the last two. No morphology.
+function searchTokens(query) {
+  return searchText(query).match(/[\p{L}\p{N}]{2,}/gu)?.map((word) => (word.length > 5 ? word.slice(0, word.length - 2) : word)) || [];
+}
+
 // Removes trailing spaces and tabs from every line. The obvious /[ \t]+\n/g is quadratic on a long run of
 // spaces (a megabyte of them freezes the process for minutes), this version is linear.
 function trimLineEnds(text) {
@@ -115,5 +127,7 @@ module.exports = {
   splitMessage,
   cutSafely,
   comparableText,
+  searchText,
+  searchTokens,
   trimLineEnds
 };

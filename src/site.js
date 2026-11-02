@@ -6,6 +6,7 @@ const { systemRng } = require("./companion/rules");
 const { TECHNIQUES } = require("./ideas/catalog");
 const { IDEA_COMMANDS } = require("./ideas/commands");
 const { SHAPE_NAMES, drawSparks, shapeOf, labelOf, formatSpark, formatTechnique } = require("./ideas/spark");
+const { encodeSpark } = require("./ideas/code");
 
 // The public website: one landing page with a spark roller. It stays static and secret-free on purpose (public
 // routes reveal nothing about people or configuration): the files of public/ are read once at start and served from
@@ -65,8 +66,25 @@ function renderPage(template, config = CONFIG) {
   return template.replace(/\{\{([A-Z_]+)\}\}/g, (token, key) => (Object.hasOwn(values, key) ? values[key] : token));
 }
 
-// `text` is the card as the bot writes it, ready to copy; `shape` names which ingredients were drawn.
-function sparkPayload(rng, { shape } = {}) {
+// The bot's address with ?start=spark_<код>, built by URL (never by gluing strings); null without PUBLIC_BOT_URL.
+function botLink(botUrl, code) {
+  if (!botUrl) {
+    return null;
+  }
+
+  try {
+    const url = new URL(botUrl);
+
+    url.searchParams.set("start", `spark_${code}`);
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+// `text` is the card as the bot writes it, ready to copy; `shape` names which ingredients were drawn; `code` is the
+// spark in short form (src/ideas/code.js) and `link` opens it in the bot.
+function sparkPayload(rng, { shape, botUrl = "" } = {}) {
   const drawn = drawSparks(rng, { shape });
 
   if (!drawn.ok) {
@@ -75,12 +93,16 @@ function sparkPayload(rng, { shape } = {}) {
 
   const [spark] = drawn.sparks;
   const { id, name, how } = drawn.technique;
+  const code = encodeSpark(spark, drawn.technique);
+  const link = botLink(botUrl, code);
 
   return {
     shape: shapeOf(spark),
     ingredients: Object.entries(spark).map(([key, value]) => ({ key, label: labelOf(key), value })),
     technique: { id, name, how },
-    text: [formatSpark(spark), formatTechnique(drawn.technique)].join("\n")
+    text: [formatSpark(spark), formatTechnique(drawn.technique)].join("\n"),
+    code,
+    ...(link ? { link } : {})
   };
 }
 
@@ -147,7 +169,7 @@ function registerSite(app, { config = CONFIG, rng = systemRng } = {}) {
         return;
       }
 
-      res.json(sparkPayload(rng, { shape: asked.shape }));
+      res.json(sparkPayload(rng, { shape: asked.shape, botUrl: config.PUBLIC_BOT_URL }));
     } catch (error) {
       logger.error("Website spark failed:", error);
       res.status(503).json({ ok: false });

@@ -129,6 +129,10 @@ p { margin: 0; }
 .slot dd { margin: 0; font: 600 1.25rem/1.25 var(--serif); transition: opacity 0.2s ease, transform 0.2s ease; }
 .spark.rolling .slot dd { opacity: 0.2; transform: translateY(4px); }
 .technique { margin-top: 16px; font-size: 0.98rem; color: var(--muted); }
+.spark-code { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin-top: 12px; font-size: 0.9rem; color: var(--muted); overflow-wrap: anywhere; }
+.spark-code[hidden], .spark-link[hidden] { display: none; }
+.spark-code code { color: var(--ink); font-weight: 600; letter-spacing: 0.04em; }
+.spark-link { color: var(--link); font-weight: 600; }
 .shape-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
 .chip { padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font: 600 0.85rem/1.2 var(--sans); cursor: pointer; }
 .chip:hover { color: var(--ink); }

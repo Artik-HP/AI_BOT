@@ -122,6 +122,32 @@ function registerProcessHandlers(shutdown) {
   }
 }
 
+// Every module with data of a person or a chat says here what /reset, any logout or block, /status and /export do to
+// it (src/lifecycle.js). Explicit and in one place, so that a new module cannot be forgotten in five others. The order
+// is the order of the /status lines.
+function registerLifecycle({ commands, lab }) {
+  const lifecycle = require("./lifecycle");
+
+  lifecycle.registerModule("chatMemory", require("./services/memory").lifecycleHooks);
+  lifecycle.registerModule("sparkHistory", require("./ideas/recent").lifecycleHooks);
+
+  if (CONFIG.COMPANION_TOOLS_ENABLED) {
+    lifecycle.registerModule("facts", require("./companion/tools").lifecycleHooks);
+    lifecycle.registerModule("ideaBank", require("./handlers/ideas").lifecycleHooks);
+    lifecycle.registerModule("reminders", require("./companion/reminders").lifecycleHooks);
+    lifecycle.registerModule("dailySpark", require("./companion/reminders").dailyHooks);
+  }
+
+  if (lab) {
+    lifecycle.registerModule("lab", lab.lifecycleHooks());
+  }
+
+  lifecycle.registerModule("menu", commands.lifecycleHooks);
+  lifecycle.registerModule("actions", require("./handlers/actions").lifecycleHooks);
+  // Any logout (/logout, /login, a block through /access) goes through auth.logout(), and it calls this.
+  require("./services/auth").setRevokeHandler((userId) => lifecycle.revokeUser(userId));
+}
+
 function start() {
   logger.info("Бот запущен");
 
@@ -149,8 +175,11 @@ function start() {
   require("./services/auth").auth.accountPolicy = CONFIG.DATABASE_URL ? (userId) => require("./database").getDatabase().checkAccount(userId) : null;
   const lab = CONFIG.AI_LAB_ENABLED ? require("./lab/telegram").registerLab(bot) : null;
   commands.initCommands(bot);
-  const reminders = CONFIG.COMPANION_TOOLS_ENABLED ? require("./companion/reminders").startReminderScheduler(bot) : null;
-  require("./services/auth").registerAuth(bot, (msg) => commands.sendMainMenu(msg.chat.id), (userId) => lab?.revokeUser(userId));
+  registerLifecycle({ commands, lab });
+  const reminders = CONFIG.COMPANION_TOOLS_ENABLED
+    ? require("./companion/reminders").startReminderScheduler(bot, { deliverDaily: (entry) => commands.deliverDaily(entry) })
+    : null;
+  require("./services/auth").registerAuth(bot, (msg, payload) => commands.afterLogin(msg, payload));
   registerVoiceHandler(bot);
   registerPhotoHandler(bot);
   registerTextHandler(bot, commands, lab);

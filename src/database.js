@@ -4,6 +4,14 @@ const path = require("path");
 const CONFIG = require("./config");
 const logger = require("./utils/logger");
 
+// "active", "blocked" or "expired" for an account row; null when there is no row at all. Blocking is an explicit
+// record, so a person without a row is not blocked.
+function accountState(account, now = Date.now()) {
+  if (!account) return null;
+  if (account.status !== "active") return "blocked";
+  return account.until && new Date(account.until).getTime() <= now ? "expired" : "active";
+}
+
 class Database {
   constructor(pool) { this.pool = pool; }
   async migrate() {
@@ -27,10 +35,14 @@ class Database {
     const user = result.rows[0];
     return { allowed: user.status === "active" && (!user.access_until || new Date(user.access_until).getTime() > Date.now()), until: user.access_until };
   }
-  async allowed(userId) {
+  // A plain read of the person's row: checkAccount() stamps last_login_at, so delivery checks and /me use this instead.
+  async account(userId) {
     const result = await this.pool.query("SELECT status, access_until FROM ai_bot.users WHERE telegram_id = $1", [String(userId)]);
     const user = result.rows[0];
-    return Boolean(user && user.status === "active" && (!user.access_until || new Date(user.access_until).getTime() > Date.now()));
+    return user ? { status: user.status, until: user.access_until ? new Date(user.access_until).toISOString() : null } : null;
+  }
+  async allowed(userId) {
+    return accountState(await this.account(userId)) === "active";
   }
   async users() {
     return (await this.pool.query("SELECT telegram_id, status, access_until, created_at, last_login_at FROM ai_bot.users ORDER BY last_login_at DESC LIMIT 30")).rows;
@@ -69,4 +81,4 @@ function getDatabase() {
   return singleton;
 }
 
-module.exports = { Database, getDatabase };
+module.exports = { Database, getDatabase, accountState };

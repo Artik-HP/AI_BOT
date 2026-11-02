@@ -17,6 +17,7 @@ const {
 const { resolvePersona, usesCompanionEngine } = require("./persona");
 const { getStore } = require("./store");
 const { withHint } = require("./hints");
+const { fallbackReply } = require("./outcomes");
 const { toolsFor, createToolContext, executeTool, recentFacts } = require("./tools");
 const { digestFor } = require("../ideas/bank");
 
@@ -26,7 +27,6 @@ const { digestFor } = require("../ideas/bank");
 
 const TOOL_BLOCK_MS = 10 * 60 * 1000;
 const MAX_CALLS_PER_ROUND = 6;
-const FALLBACK_REPLY = "Готово.";
 
 // A model without tool support answers 404/400 "no endpoints support tool use". Remember that for a while
 // instead of paying for one failed request per message.
@@ -111,6 +111,8 @@ async function runCompletion({ memory, history, currentTurn, turn, useTools, too
         result = withHint({ ok: false, error: "too_many_calls_in_one_round", max: MAX_CALLS_PER_ROUND });
       }
 
+      // Outcomes, not just a count: an empty final answer must not be read as "done" after a refusal.
+      turn.outcomes.push({ name: call.function.name, ok: result?.ok !== false, error: result?.error });
       messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: JSON.stringify(result) });
     }
 
@@ -142,6 +144,7 @@ async function askCompanion(chatId, text, from, chat = {}) {
     facts: useTools ? loadFacts(chatId, userId) : [],
     ideas: useTools && persona === "ideas" ? loadIdeaBank(chatId, userId) : null,
     executed: 0,
+    outcomes: [],
     onRound: chat.onRound
   };
   let result;
@@ -180,7 +183,7 @@ async function askCompanion(chatId, text, from, chat = {}) {
       throw new ApiError("OpenRouter вернул пустой ответ", { code: "EMPTY_REPLY" });
     }
 
-    reply = FALLBACK_REPLY;
+    reply = fallbackReply(turn.outcomes);
   }
 
   checkContext();

@@ -38,7 +38,8 @@ const ERROR_HINTS = {
   time_is_in_the_past_or_too_soon: "Choose a moment at least minSeconds from now.",
   too_far_ahead: "A reminder can be at most maxDays ahead.",
   too_many_reminders: "The person has the most pending reminders allowed. They can see and cancel them with /reminders.",
-  too_many_reminders_in_chat: "This chat has the most pending reminders allowed. They can be seen and cancelled with /reminders."
+  too_many_reminders_in_chat: "This chat has the most pending reminders allowed. They can be seen and cancelled with /reminders.",
+  idea_not_found: "No such idea of this person here: take the id from idea_save or idea_list, or create the reminder without idea_id."
 };
 
 // Adds the table's hint to a refusal that has none. Successes and unknown codes pass through untouched.
