@@ -32,7 +32,7 @@
     "telegram": "^2.26.22"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.13",
+    "@electric-sql/pglite": "^0.5.14",
     "@eslint/js": "^9.39.5",
     "eslint": "^9.39.5",
     "globals": "^16.5.0"
