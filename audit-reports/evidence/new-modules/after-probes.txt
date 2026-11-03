@@ -1,0 +1,27 @@
+# Те же пробы ПОСЛЕ исправлений; код: 29893fe + правки N-01…N-08; дата 2026-11-03T13:44:04Z
+# Как читать: у probe-auth ok = дефект ещё воспроизводится, not ok = исправлен (утверждения проб написаны на дефект).
+#            у probe-e2e P1 печатает число ответов (было 60), P2/P3 ok = обычный чат работает (было not ok).
+
+## probe-auth.test.js с владельцем 42 (BOT_OWNER_CHAT_ID=42): P4a/P4b — not ok = исправлено для владельца
+# owner login after 50 foreign failures -> {"ok":true}
+not ok 1 - P4a: 10 strangers x 5 wrong guesses lock the REAL owner out (global limit 50)
+# owner login while 2 strangers are being checked -> {"ok":true}
+not ok 2 - P4b: two concurrent strangers keep every scrypt slot busy for the owner
+# authenticate -> {"ok":false,"reason":"blocked"} | authenticated() right after: false
+not ok 3 - P5: invalid access_until yields a session that is 'logged in' but already dead
+# failures recorded for user 777: none | global failures: 20
+ok 4 - P6: failures map full (10000) -> new wrong guesses are not counted per user
+# pass 1
+# fail 3
+
+## probe-e2e.test.js
+# P1: 60 messages from an unauthenticated stranger (RATE_LIMIT_MESSAGES=5/min) -> 6 bot replies, 0 OpenRouter requests
+ok 1 - P1: a stranger without the password floods the bot - how many replies does he get?
+# P2: replies to a normal message with a corrupt lab file -> ["обычный ответ на обычный вопрос"] | OpenRouter chat requests: 1
+# P2: log tail: 2026-11-03T13:44:12.068Z WARN  The lab store is unavailable; the lab is off, ordinary chat is not affected {"reason":"ENOENT"}
+ok 2 - P2: corrupt lab store file - does NORMAL private chat still work?
+# P3: replies to a normal message with a stale lock -> ["обычный ответ"]
+# P3: after /lab -> ["Хранилище лаборатории занято другим процессом или требует проверки владельца."]
+ok 3 - P3: stale lab lock left by a previous container run (same PID as the new process)
+# pass 3
+# fail 0

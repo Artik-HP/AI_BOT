@@ -6,6 +6,17 @@ const COLLECTIONS = ["projects", "experiments", "tracks", "artifacts", "operatio
 const STATES = new Set(["planned", "running", "completed", "partial", "error", "cancelled", "unknown"]);
 const id = () => crypto.randomBytes(12).toString("hex");
 const retrySleep = new Int32Array(new SharedArrayBuffer(4));
+const PROCESS_STARTED_AT = Date.now() - process.uptime() * 1000;
+
+// A claim file written before this process started cannot belong to it, even if the PID is the same. That is exactly
+// what a restart in a container leaves behind (the bot is PID 1 every time), and a PID check alone would call it "alive".
+function predatesThisProcess(file) {
+  try {
+    return fs.statSync(file).mtimeMs < PROCESS_STARTED_AT - 1000;
+  } catch {
+    return false;
+  }
+}
 
 // Windows readers / scanners can briefly hold a file without share-delete access.
 // Retry only filesystem publication, never the mutation callback or a paid AI request.
@@ -77,11 +88,20 @@ class LabStore {
       const guard = `${lock}.recovery`;
       let fd;
       try {
-        fd = fs.openSync(guard, "wx", 0o600);
+        try { fd = fs.openSync(guard, "wx", 0o600); }
+        catch (guardError) {
+          // A recovery interrupted by a crash leaves its guard behind; one older than this process is not in progress.
+          if (guardError.code !== "EEXIST" || !predatesThisProcess(guard)) throw guardError;
+          fs.unlinkSync(guard);
+          fd = fs.openSync(guard, "wx", 0o600);
+        }
         const owner = JSON.parse(fs.readFileSync(lock, "utf8"));
         if (!Number.isInteger(owner.pid) || owner.pid <= 0) throw new Error("LAB_STORE_LOCKED", { cause: error });
-        try { process.kill(owner.pid, 0); throw new Error("LAB_STORE_LOCKED", { cause: error }); }
-        catch (probe) { if (probe.code !== "ESRCH") throw probe; }
+        const reusedPid = owner.pid === process.pid && predatesThisProcess(lock);
+        if (!reusedPid) {
+          try { process.kill(owner.pid, 0); throw new Error("LAB_STORE_LOCKED", { cause: error }); }
+          catch (probe) { if (probe.code !== "ESRCH") throw probe; }
+        }
         fs.unlinkSync(lock);
         create();
       } catch (error) {

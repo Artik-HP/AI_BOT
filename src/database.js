@@ -52,15 +52,23 @@ class Database {
   async close() { await this.pool.end(); }
 }
 
+// Why a DATABASE_URL would be refused, as a stable code (never the URL itself, it holds the password), or null.
+function databaseUrlProblem(url) {
+  let parsed;
+  try { parsed = new URL(url); } catch { return "DATABASE_URL_INVALID"; }
+  if (!["postgres:", "postgresql:"].includes(parsed.protocol)) return "DATABASE_URL_INVALID";
+  if (!["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname) && parsed.searchParams.get("sslmode") !== "verify-full") {
+    return "DATABASE_TLS_REQUIRED";
+  }
+  return null;
+}
+
 let singleton;
 function getDatabase() {
   if (!CONFIG.DATABASE_URL) return null;
   if (!singleton) {
-    const parsed = new URL(CONFIG.DATABASE_URL);
-    if (!["postgres:", "postgresql:"].includes(parsed.protocol)) throw new Error("DATABASE_URL_INVALID");
-    if (!["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname) && parsed.searchParams.get("sslmode") !== "verify-full") {
-      throw new Error("DATABASE_TLS_REQUIRED");
-    }
+    const problem = databaseUrlProblem(CONFIG.DATABASE_URL);
+    if (problem) throw new Error(problem);
     const pool = new Pool({ connectionString: CONFIG.DATABASE_URL, max: 5, connectionTimeoutMillis: 5000,
       idleTimeoutMillis: 10000, statement_timeout: 5000, query_timeout: 6000, application_name: "ai-bot" });
     pool.on("error", () => logger.error("PostgreSQL connection unavailable"));
@@ -69,4 +77,4 @@ function getDatabase() {
   return singleton;
 }
 
-module.exports = { Database, getDatabase };
+module.exports = { Database, getDatabase, databaseUrlProblem };

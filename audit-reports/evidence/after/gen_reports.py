@@ -135,7 +135,8 @@ lines.append("Составлен из тех же данных, что и [`FIXE
 lines.append("")
 lines.append("Связанные документы: [первичный аудит](AUDIT_INITIAL_2026-10-19_02-03.md) (заморожен), [повторный аудит](AUDIT_SECOND_2026-10-19_04-10.md), "
              "[исправления](FIXES_REPORT.md), [модернизация](IMPROVEMENTS_REPORT.md), [результаты тестов](TEST_RESULTS.md), "
-             "[остатки](REMAINING_ISSUES.md), [готовность](FINAL_READINESS.md).")
+             "[остатки](REMAINING_ISSUES.md), [готовность](FINAL_READINESS.md). Новый код владельца после `83053cc` проверен отдельно: "
+             "[аудит новых модулей](AUDIT_NEW_MODULES_2026-11-03_13-28.md) и [исправления](FIXES_NEW_MODULES.md).")
 lines.append("")
 lines.append("## Сводка")
 lines.append("")
