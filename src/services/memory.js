@@ -765,6 +765,11 @@ function getUserCount() {
   return Object.keys(users).length;
 }
 
+// Registered in src/bot.js (src/lifecycle.js): /reset forgets the talk of the chat.
+const lifecycleHooks = {
+  forgetChat: (chatId) => resetMemory(chatId)
+};
+
 module.exports = {
   MAX_HISTORY_MESSAGES,
   MAX_STORED_MESSAGES: MAX_STORED_CHAT_MESSAGES,
@@ -778,6 +783,7 @@ module.exports = {
   getPersona,
   setPersona,
   getUserCount,
+  lifecycleHooks,
   updatePersonalityMemory,
   getLastMessageByRole,
   buildSystemPrompt,

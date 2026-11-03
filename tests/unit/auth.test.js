@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { PasswordAuth, hashPassword } = require("../../src/services/auth");
+const { PasswordAuth, hashPassword, startPayloadOf } = require("../../src/services/auth");
 const { TEST_PASSWORD, TEST_PASSWORD_HASH } = require("../helpers/authFixture");
 const fs = require("fs");
 const os = require("os");
@@ -31,6 +31,58 @@ test("password auth: attempts lock out per actor; sessions expire and old genera
   assert.equal(auth.valid(old), false);
   now += 101;
   assert.equal(auth.authenticated(5), false);
+});
+
+test("D3: любой logout вызывает обработчик отзыва — ошибка обработчика не ломает выход; без обработчика — как раньше", async () => {
+  const auth = new PasswordAuth({ hash: TEST_PASSWORD_HASH });
+
+  await auth.authenticate(5, TEST_PASSWORD);
+  assert.doesNotThrow(() => auth.logout(5), "без обработчика выход работает");
+
+  const revoked = [];
+
+  auth.onRevoke = (userId) => { revoked.push(userId); };
+  await auth.authenticate(5, TEST_PASSWORD);
+  auth.logout(5);
+  auth.logout(6);
+  assert.deepEqual(revoked, ["5", "6"], "и для того, кто не входил: отзыв идемпотентен");
+  assert.equal(auth.authenticated(5), false);
+
+  auth.onRevoke = () => { throw new Error("hook failed"); };
+  await auth.authenticate(5, TEST_PASSWORD);
+  assert.doesNotThrow(() => auth.logout(5));
+  assert.equal(auth.authenticated(5), false, "сессия закрыта, даже если обработчик упал");
+
+  auth.onRevoke = async () => { throw new Error("async hook failed"); };
+  assert.doesNotThrow(() => auth.logout(5), "отклонённый промис не становится unhandledRejection");
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test("вход по ссылке: /start spark_<код> запоминается только в проверенном виде, на срок вызова на вход и один раз", () => {
+  const clock = { now: 0 };
+  const auth = new PasswordAuth({ hash: TEST_PASSWORD_HASH, now: () => clock.now });
+
+  assert.deepEqual(["/start spark_9AbC-_12", "/start@test_bot spark_x", "/start other", "/start", "/start spark_a b", "/start spark_кофе"].map(startPayloadOf),
+    ["spark_9AbC-_12", "spark_x", null, null, null, null]);
+
+  auth.challenge(5, "spark_9AbC-_12");
+  assert.equal(auth.takeStartPayload(5), "spark_9AbC-_12");
+  assert.equal(auth.takeStartPayload(5), null, "один раз");
+
+  auth.challenge(5, "spark_<script>");
+  assert.equal(auth.takeStartPayload(5), null, "непроверенный формат не хранится");
+
+  auth.challenge(5, "spark_late");
+  clock.now += 10 * 60000 + 1;
+  assert.equal(auth.takeStartPayload(5), null, "срок — как у вызова на вход");
+
+  auth.challenge(5, "spark_gone");
+  auth.logout(5);
+  assert.equal(auth.takeStartPayload(5), null, "выход забывает нагрузку");
+
+  auth.challenge(5, "spark_first");
+  auth.challenge(5);
+  assert.equal(auth.takeStartPayload(5), null, "новый /start без ссылки заменяет старую нагрузку");
 });
 
 test("password auth: logout while verifier runs cannot create a new session afterward", async () => {

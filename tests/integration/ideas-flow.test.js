@@ -377,7 +377,8 @@ test("искру с карточки можно поменять в разгов
     }
 
     assert.ok(spark.twist && spark.twist !== shown.twist, "поворот новый");
-    assert.equal(`Приём «${result.technique.name}»`, card.match(/Приём «.+?»/)[0], "приём прежний");
+    // A technique name may hold quotes of its own («Пять «почему»»), so the whole card line is compared.
+    assert.ok(card.includes(`\nПриём «${result.technique.name}»: `), "приём прежний");
   });
 });
 

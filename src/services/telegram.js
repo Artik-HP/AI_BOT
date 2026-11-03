@@ -313,34 +313,42 @@ function getBotToBotReplyOptions(msg) {
   };
 }
 
+// Returns the last message sent (buttons are bound to its message_id), or null when nothing was sent.
 async function sendAIMessage(chatId, reply, options = {}) {
   checkContext();
   const cleanReply = dedupeRepeatedReply(reply);
 
   if (!cleanReply) {
-    return;
+    return null;
   }
 
   // The same incoming message must never be answered twice; different messages may well get equal answers.
   if (options.sourceMessageId && !repliedMessages.claim(`${chatId}:${options.sourceMessageId}`)) {
-    return;
+    return null;
   }
 
   logger.message("out", { chatId }, cleanReply);
-  await sendCleanTextMessage(chatId, cleanReply, options);
+  return sendCleanTextMessage(chatId, cleanReply, options);
 }
 
+// `options.replyMarkup` (inline buttons) rides on the last part only.
 async function sendCleanTextMessage(chatId, cleanReply, options = {}) {
   const parts = limitReplyParts(splitMessage(prefixBotMention(cleanReply, options.targetUsername)));
+  let last = null;
 
   for (const [index, part] of parts.entries()) {
     checkContext();
-    await getTelegramBot().sendMessage(chatId, part, index === 0 ? buildSendMessageOptions(options) : {});
+    last = await getTelegramBot().sendMessage(chatId, part, {
+      ...(index === 0 ? buildSendMessageOptions(options) : {}),
+      ...(index === parts.length - 1 && options.replyMarkup ? { reply_markup: options.replyMarkup } : {})
+    });
   }
+
+  return last;
 }
 
 async function sendAIResponse(chatId, reply, options = {}) {
-  await sendAIMessage(chatId, reply, options);
+  return sendAIMessage(chatId, reply, options);
 }
 
 function getDownloadOptions(options) {

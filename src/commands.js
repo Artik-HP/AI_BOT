@@ -14,17 +14,19 @@ const {
   MAX_STORED_MESSAGES,
   getPersona,
   getUserMemory,
-  resetMemory,
   setPersona
 } = require("./services/memory");
+const lifecycle = require("./lifecycle");
+const { formatTime } = require("./utils/time");
 const { PERSONAS, parsePersonaName, personaLabel } = require("./companion/persona");
-const { cancelReminders, listReminders } = require("./companion/reminders");
+const { cancelDaily, cancelReminders, dailyOf, listReminders, setDaily } = require("./companion/reminders");
 const { getStore } = require("./companion/store");
-const { forgetChat } = require("./companion/tools");
 const { isOwner } = require("./services/access");
-const { admitCallback, admitMessage } = require("./handlers/guard");
-const { IDEA_BUTTONS, IDEA_COMMANDS, kindForButton, createIdeaCommands } = require("./handlers/ideas");
-const { sparkHistory } = require("./ideas/recent");
+const { redact } = require("./utils/redact");
+const { admitAuthenticated, admitCallback, admitMessage, messageAuthorized } = require("./handlers/guard");
+const { IDEA_BUTTONS, IDEA_COMMANDS, dateStamp, kindForButton, createIdeaCommands, startSparkCode } = require("./handlers/ideas");
+const { callbackMessage, registerActions } = require("./handlers/actions");
+const { answerWithAi } = require("./handlers/reply");
 
 let bot;
 let ideaCommands;
@@ -38,6 +40,22 @@ function boundInlineMenu(chatId, userId, messageId = null) {
   menuSessions.set(token, entry);
   return { entry, options: { reply_markup: { inline_keyboard: INLINE_MENU.reply_markup.inline_keyboard.map((row) => row.map((button) =>
     ({ ...button, callback_data: `menu:${token}:${button.callback_data.slice(5)}` }))) } } };
+}
+
+// Registered in src/bot.js (src/lifecycle.js): after a logout or a block this person's inline menus stop working.
+const lifecycleHooks = {
+  revokeUser(userId) {
+    for (const [token, entry] of menuSessions) {
+      if (entry.userId === String(userId)) {
+        menuSessions.delete(token);
+      }
+    }
+  }
+};
+
+// The lab and other personal data exist only in a private chat with the person.
+function isPrivateChat(chatId, userId, chatType = "private") {
+  return chatType === "private" && String(chatId) === String(userId);
 }
 
 function onUserText(regexp, callback) {
@@ -106,10 +124,14 @@ const PUBLIC_COMMANDS = [
   { command: "status", description: "Проверить память и лимиты", usage: "/status - память и лимиты" },
   { command: "reset", description: "Очистить память этого чата", usage: "/reset - очистить память этого чата" },
   { command: "style", description: "Характер бота: идеи, собеседник или классика", usage: "/style - характер бота (идеи, собеседник или классика)" },
-  ...(CONFIG.COMPANION_TOOLS_ENABLED ? [{ command: "reminders", description: "Мои напоминания", usage: "/reminders - мои напоминания, /reminders clear - отменить все" }] : []),
+  ...(CONFIG.COMPANION_TOOLS_ENABLED ? [
+    { command: "reminders", description: "Мои напоминания", usage: "/reminders - мои напоминания, /reminders clear - отменить все" },
+    { command: "daily", description: "Искра дня", usage: "/daily 09:00 - искра каждый день в это время (в личном чате), /daily off - выключить" }
+  ] : []),
   { command: "login", description: "Войти по паролю", usage: "/login - войти заново" },
   { command: "logout", description: "Закрыть доступ", usage: "/logout - выйти и закрыть доступ" },
   { command: "me", description: "Мой доступ", usage: "/me - срок и статус доступа" },
+  { command: "export", description: "Мои данные одним файлом", usage: "/export - мои данные одним файлом: идеи, факты, напоминания, лаборатория (только в личном чате)" },
   ...(CONFIG.AI_LAB_ENABLED ? [{ command: "lab", description: "AI-лаборатория", usage: "/lab - идеи, эксперименты, обучение и инструменты" }] : [])
 ];
 
@@ -163,10 +185,24 @@ function initCommands(telegramBot) {
   ideaCommands = createIdeaCommands({ bot, keyboard: MAIN_KEYBOARD });
 
   registerCommandMenus(bot);
+  // Buttons under the spark card and under a reply with ideas (src/handlers/actions.js). A press under ideas is the
+  // words a person would type, sent to the model through the usual pipeline.
+  registerActions(bot, {
+    spark: (query, entry) => ideaCommands.sparkButton(query, entry),
+    ideas: (query, entry) => ({ run: () => answerWithAi(bot, callbackMessage(query), entry.data.text) }),
+    daily: (query, entry) => ideaCommands.dailyButton(query, entry)
+  });
 
   onUserText(/^\/start(?:@\w+)?(?:\s|$)/, async (msg) => {
     const chatId = msg.chat.id;
-    return sendMainMenu(chatId, msg.from.id);
+    await sendMainMenu(chatId, msg.from.id);
+
+    // "Развить в Telegram" on the website opens t.me/<bot>?start=spark_<код>: the menu, then that very spark.
+    const code = startSparkCode(msg.text);
+
+    if (code) {
+      await ideaCommands.sparkFromCode(msg, code);
+    }
   });
 
   for (const { command } of IDEA_COMMANDS) {
@@ -191,7 +227,15 @@ function initCommands(telegramBot) {
     onUserText(/^\/reminders(?:@\w+)?(?:\s|$)/, async (msg) => {
       await handleReminders(msg);
     });
+
+    onUserText(/^\/daily(?:@\w+)?(?:\s|$)/, async (msg) => {
+      await handleDaily(msg);
+    });
   }
+
+  onUserText(/^\/export(?:@\w+)?(?:\s|$)/, async (msg) => {
+    await sendExport(msg);
+  });
 
   onUserText(/^\/menu(?:@\w+)?(?:\s|$)/, async (msg) => {
     await sendMainMenu(msg.chat.id, msg.from.id);
@@ -202,7 +246,7 @@ function initCommands(telegramBot) {
   });
 
   onUserText(/^\/status(?:@\w+)?(?:\s|$)/, async (msg) => {
-    await sendStatus(msg.chat.id);
+    await sendStatus(msg.chat.id, { userId: msg.from.id, isPrivate: isPrivateChat(msg.chat.id, msg.from.id, msg.chat.type) });
   });
 
   onUserText(/^\/bot_status(?:@\w+)?(?:\s|$)/, async (msg) => {
@@ -235,7 +279,7 @@ function initCommands(telegramBot) {
 
     try {
       await bot.answerCallbackQuery(query.id);
-      await handleInlineMenu(chatId, messageId, action, query.from.id);
+      await handleInlineMenu(chatId, messageId, action, query.from.id, query.message.chat.type);
     } catch (error) {
       logger.error("Inline menu error:", error);
       await bot.answerCallbackQuery(query.id, {
@@ -261,6 +305,24 @@ async function sendMainMenu(chatId, userId = chatId) {
   const menu = boundInlineMenu(chatId, userId);
   const sent = await bot.sendMessage(chatId, "Панель управления:", menu.options);
   menu.entry.messageId = sent.message_id;
+}
+
+// After a password login: the menu, then the spark of a "/start spark_<код>" link the person came with. The password
+// message is never passed on: the spark gets a message of its own with only the chat and the author, and a lease of
+// the session that has just been opened. The login consumed the original message before the allow-list and the rate
+// limit, so the spark is admitted by them here, like any message.
+async function afterLogin(msg, payload = null) {
+  await sendMainMenu(msg.chat.id, msg.from.id);
+
+  const code = payload ? startSparkCode(`/start ${payload}`) : null;
+
+  if (code) {
+    const start = { message_id: `login:${crypto.randomBytes(6).toString("hex")}`, chat: msg.chat, from: msg.from, date: msg.date };
+
+    if (await admitAuthenticated(bot, start)) {
+      await ideaCommands.sparkFromCode(start, code);
+    }
+  }
 }
 
 async function sendHelp(chatId) {
@@ -293,7 +355,9 @@ async function sendVoiceHelp(chatId) {
   );
 }
 
-async function sendStatus(chatId) {
+// The chat's own lines first, unchanged; then the lines of the modules registered in src/lifecycle.js (idea bank,
+// reminders, lab). A module that fails gives no line, and /status answers anyway.
+async function sendStatus(chatId, { userId = chatId, isPrivate = isPrivateChat(chatId, userId) } = {}) {
   const memory = getUserMemory(chatId);
   const lines = [
     "Статус:",
@@ -327,7 +391,9 @@ async function sendStatus(chatId) {
     );
   }
 
-  await bot.sendMessage(chatId, lines.join("\n"), MAIN_KEYBOARD);
+  const modules = await lifecycle.statusLines({ chatId: String(chatId), userId: String(userId), isPrivate });
+
+  await bot.sendMessage(chatId, [...lines, ...modules.lines].join("\n"), MAIN_KEYBOARD);
 }
 
 function isBotToBotOwner(chatId, userId) {
@@ -457,10 +523,6 @@ async function handleStyle(msg) {
   await bot.sendMessage(chatId, `Готово, теперь характер: ${personaLabel(next)}.`, MAIN_KEYBOARD);
 }
 
-function formatReminderTime(timestamp) {
-  return `${new Date(timestamp).toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
-
 async function handleReminders(msg) {
   const chatId = msg.chat.id;
   const userId = msg.from?.id ?? chatId;
@@ -486,7 +548,7 @@ async function handleReminders(msg) {
 
     await bot.sendMessage(chatId, [
       "Твои напоминания:",
-      ...list.map((item) => `${formatReminderTime(item.dueAt)} - ${item.text} (код ${item.id})`),
+      ...list.map((item) => `${formatTime(item.dueAt, CONFIG.BOT_TIMEZONE)} - ${item.text} (код ${item.id})${item.ideaId ? ` (идея ${item.ideaId})` : ""}`),
       "",
       "Отменить одно: /reminders cancel код. Отменить все: /reminders clear."
     ].join("\n"));
@@ -496,20 +558,76 @@ async function handleReminders(msg) {
   }
 }
 
-async function resetChatMemory(chatId) {
-  resetMemory(chatId);
-  // Which sparks the chat saw lately is memory of the talk as well.
-  sparkHistory.forget(chatId);
+const DAILY_TIME = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
-  // Facts the companion saved about people in this chat are memory too. Characters and games are progress and stay.
-  if (CONFIG.COMPANION_TOOLS_ENABLED) {
-    try {
-      forgetChat(getStore(), chatId);
-    } catch (error) {
-      logger.error("Could not clear saved facts:", error);
-    }
+// "/daily 09:00" — a spark card without AI every day at that time (BOT_TIMEZONE, otherwise UTC, and the answer says
+// which), with a button for the ideas; "/daily off" switches it off; "/daily" shows the state. Private chat only.
+async function handleDaily(msg) {
+  const chatId = msg.chat.id;
+  const userId = String(msg.from.id);
+  const argument = String(msg.text || "").replace(/^\/daily(?:@\w+)?/i, "").trim().toLowerCase();
+  const zone = CONFIG.BOT_TIMEZONE;
+  const zoneNote = zone ? `по времени ${zone}` : "по UTC: часовой пояс бота не задан";
+
+  if (!isPrivateChat(chatId, userId, msg.chat.type)) {
+    await bot.sendMessage(chatId, "Искра дня приходит в личный диалог с ботом: включи её там командой /daily 09:00.");
+    return;
   }
 
+  try {
+    const store = getStore();
+    const time = argument.match(DAILY_TIME);
+
+    if (["off", "выкл", "стоп", "stop"].includes(argument)) {
+      await bot.sendMessage(chatId, cancelDaily(store, userId) ? "Искра дня выключена." : "Искра дня и так выключена. Включить: /daily 09:00.");
+    } else if (time) {
+      const entry = setDaily(store, { chatId, userId, time: `${time[1].padStart(2, "0")}:${time[2]}`, timeZone: zone }, Date.now());
+
+      await bot.sendMessage(chatId, `Готово: каждый день в ${entry.time} (${zoneNote}) пришлю искру без AI, а идеи к ней — по кнопке. ` +
+        `Первая: ${formatTime(entry.nextAt, zone)}. Выключить: /daily off.`);
+    } else if (!argument) {
+      const entry = dailyOf(store, userId);
+
+      await bot.sendMessage(chatId, entry
+        ? `Искра дня: каждый день в ${entry.time} (${entry.timeZone ? `по времени ${entry.timeZone}` : "по UTC"}). Следующая: ${formatTime(entry.nextAt, entry.timeZone)}. Выключить: /daily off.`
+        : `Искра дня выключена. Включить: /daily 09:00 (${zoneNote}).`);
+    } else {
+      await bot.sendMessage(chatId, "Формат: /daily 09:00 (часы и минуты) или /daily off.");
+    }
+  } catch (error) {
+    logger.error("Daily spark command error:", error);
+    await bot.sendMessage(chatId, "Искра дня сейчас недоступна. Попробуй позже.");
+  }
+}
+
+// The scheduler (src/companion/reminders.js) calls this at the time of a daily spark.
+function deliverDaily(entry) {
+  return ideaCommands.deliverDaily(entry);
+}
+
+// "My data": one JSON file with what the modules registered in src/lifecycle.js keep about this person (ideas, facts,
+// reminders, lab), only in the private chat, without AI. The chat history (memory.json) is not part of it. The whole
+// file goes through redact(): a configured secret that ended up in someone's text is masked.
+async function sendExport(msg) {
+  const chatId = msg.chat.id;
+  const userId = String(msg.from.id);
+
+  if (!isPrivateChat(chatId, userId, msg.chat.type)) {
+    await bot.sendMessage(chatId, "Открой /export в личном диалоге с ботом: файл с твоими данными приходит только туда.");
+    return;
+  }
+
+  const { data, failed } = await lifecycle.exportData({ userId });
+  const file = { version: 1, exportedAt: new Date().toISOString(), userId, ...data, ...(failed.length ? { unavailable: failed } : {}) };
+
+  if (!messageAuthorized(msg)) return;
+  await bot.sendDocument(chatId, Buffer.from(redact(JSON.stringify(file, null, 2))), {}, { filename: `my-data-${dateStamp()}.json`, contentType: "application/json" });
+}
+
+// What /reset forgets is decided by the modules registered in src/lifecycle.js: the talk, the recent sparks and the
+// saved facts. The character of the chat, game progress, ideas, reminders and the lab stay.
+async function resetChatMemory(chatId) {
+  await lifecycle.forgetChat(chatId);
   await bot.sendMessage(chatId, "Память этого чата очищена.", MAIN_KEYBOARD);
 }
 
@@ -542,7 +660,7 @@ async function handleMenuButton(chatId, text, userId = chatId, msg = null) {
   }
 
   if (text === BUTTONS.status) {
-    await sendStatus(chatId);
+    await sendStatus(chatId, { userId, isPrivate: isPrivateChat(chatId, userId, msg?.chat?.type) });
     return true;
   }
 
@@ -554,7 +672,7 @@ async function handleMenuButton(chatId, text, userId = chatId, msg = null) {
   return false;
 }
 
-async function handleInlineMenu(chatId, messageId, action, userId = chatId) {
+async function handleInlineMenu(chatId, messageId, action, userId = chatId, chatType = "private") {
   if (action === "main") {
     const menu = boundInlineMenu(chatId, userId, messageId);
     await bot.editMessageText("Панель управления:", {
@@ -576,7 +694,7 @@ async function handleInlineMenu(chatId, messageId, action, userId = chatId) {
   }
 
   if (action === "status") {
-    await sendStatus(chatId);
+    await sendStatus(chatId, { userId, isPrivate: isPrivateChat(chatId, userId, chatType) });
     return;
   }
 
@@ -594,6 +712,8 @@ module.exports = {
   PUBLIC_COMMANDS,
   OWNER_COMMANDS,
   sendMainMenu,
+  afterLogin,
+  deliverDaily,
   sendHelp,
   sendVoiceHelp,
   sendStatus,
@@ -601,5 +721,7 @@ module.exports = {
   sendBotMessageFromCommand,
   resetChatMemory,
   handleMenuButton,
-  handleInlineMenu
+  handleInlineMenu,
+  isPrivateChat,
+  lifecycleHooks
 };

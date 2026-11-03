@@ -2,8 +2,15 @@ const CONFIG = require("../config");
 const fs = require("fs");
 const { LabService } = require("./service");
 const { id, scopeKey } = require("./store");
-const { splitMessage } = require("../utils/text");
+const { cutSafely, splitMessage } = require("../utils/text");
 const { safeHandler } = require("../utils/safe");
+const bank = require("../ideas/bank");
+const { BANK_ENABLED } = require("../ideas/commands");
+const { sparkHistory } = require("../ideas/recent");
+const { formatSpark, formatTechnique } = require("../ideas/spark");
+const { systemRng } = require("../companion/rules");
+const { looksCredential } = require("../companion/secrets");
+const { getStore } = require("../companion/store");
 const { admitCallback, admitMessage } = require("../handlers/guard");
 const { claimIncomingMessage, isAddressedToThisBot } = require("../services/telegram");
 const schema = require("./schemas");
@@ -24,9 +31,44 @@ const ERRORS = {
   LAB_LESSON_NOT_SOLVED: "Этот переход сейчас недоступен. Открой текущий урок.",
   LAB_STORE_LIMIT: "Достигнут лимит: 30 объектов каждого типа или 100 попыток на трек. Удали ненужные данные.",
   LAB_STORE_SIZE: "Хранилище заполнено. Экспортируй и удали ненужные проекты.",
-  LAB_INCOMPLETE_REPLY: "Ответ модели не завершён. Готовый результат не сохранён. Новая генерация требует нового действия."
+  LAB_INCOMPLETE_REPLY: "Ответ модели не завершён. Готовый результат не сохранён. Новая генерация требует нового действия.",
+  LAB_SPARK_FAILED: "Искра не загорелась. Опиши задачу словами или попробуй ещё раз."
 };
 const button = (label, action, entityId = null, value = null) => ({ label, action, entityId, value });
+
+// A plan and tool examples as people read them; the project export keeps the JSON. Long screens are split by screen().
+const numbered = (items) => items.map((item, index) => `${index + 1}. ${item}`).join("\n");
+function formatPlan(plan) {
+  return [`Вход: ${plan.input}`, `Обработка: ${plan.processing}`, `Результат: ${plan.output}`,
+    `Задачи:\n${numbered(plan.tasks)}`, `Критерии приёмки:\n${numbered(plan.acceptance)}`, `Демо: ${plan.demo}`].join("\n");
+}
+function formatExamples(examples) {
+  return examples.map((example) => `${example.input} → ${example.output}`).join("\n");
+}
+
+// A lab idea as an entry of the idea bank, without AI: the title, the gist from the problem and the result, the first
+// MVP item as the next step, the tag "лаборатория". Cut to the bank's limits like any other saved idea.
+function labIdeaForBank(idea) {
+  const { IDEA_LIMITS } = bank;
+
+  return {
+    title: cutSafely(idea.title, IDEA_LIMITS.titleChars).trim(),
+    pitch: cutSafely(`${idea.problem} Результат: ${idea.output}`, IDEA_LIMITS.pitchChars).trim(),
+    tags: ["лаборатория"],
+    next: idea.mvp?.[0] ? cutSafely(idea.mvp[0], IDEA_LIMITS.nextChars).trim() : ""
+  };
+}
+
+// The request for three program ideas around an idea of the bank: its title, gist and step, nothing else of the chat.
+function bankIdeaRequest(idea) {
+  return [`Три варианта небольшой программы вокруг идеи из моего банка идей.`, `Идея: ${idea.title}`, `Суть: ${idea.pitch}`,
+    idea.next_step ? `Ближайший шаг: ${idea.next_step}` : null].filter(Boolean).join("\n");
+}
+
+const BANK_REFUSALS = {
+  too_many_ideas: "В банке уже максимум идей. Удали ненужные: /ideas del код.",
+  store_full: "Хранилище банка идей заполнено, идея не сохранена."
+};
 const BACK = button("← Назад", "home");
 const CANCEL = button("Отмена", "cancel");
 
@@ -136,12 +178,51 @@ class LabTelegram {
     ]);
   }
 
+  // "/lab a1b2c3d4" opens an idea of the bank; the menu button and a bare /lab open the home screen as before.
   async open(msg) {
     if (msg.chat.type !== "private" || String(msg.chat.id) !== String(msg.from.id)) {
       await this.bot.sendMessage(msg.chat.id, "Открой /lab в личном диалоге с ботом. Личные данные доступны только там.");
       return;
     }
-    await this.guard(this.ctx(msg), () => this.home(this.ctx(msg)));
+    const argument = /^\/lab(?:@\w+)?(?:\s|$)/i.test(msg.text || "") ? msg.text.replace(/^\/lab(?:@\w+)?/i, "").trim() : "";
+    const ctx = this.ctx(msg);
+    await this.guard(ctx, () => (argument && BANK_ENABLED ? this.bankIdea(ctx, argument) : this.home(ctx)));
+  }
+
+  // The person's idea from the bank of this (private) chat, in the shape the bank shows it, or null.
+  bankEntry(ctx, code) {
+    const idea = getStore().view((data) => (data.ideas[bank.scopeKey(ctx.chatId, ctx.userId)] || []).find((entry) => entry.id === code) || null);
+    return idea ? bank.describeIdea(idea) : null;
+  }
+
+  // Shows the idea and asks first: nothing is sent to the model before the button is pressed.
+  async bankIdea(ctx, argument) {
+    const code = bank.normalizeId(argument);
+    this.session(ctx, { mode: "home" });
+    if (!code) return this.screen(ctx, "Не понял код идеи. Код — восемь знаков из списка /ideas, например: /lab a1b2c3d4", [BACK]);
+    const idea = this.bankEntry(ctx, code);
+    if (!idea) return this.screen(ctx, `Идеи с кодом ${code} нет в твоём банке. Список: /ideas`, [BACK]);
+    this.session(ctx, { mode: "bank_preview", code });
+    return this.screen(ctx, `Идея из банка: «${idea.title}»\n${idea.pitch}${idea.next_step ? `\nШаг: ${idea.next_step}` : ""}\n\n` +
+      "Сделать из неё три варианта программы? Это 1 генерация лаборатории.", [button("Сделать 3 варианта", "bank_ideas", null, code), BACK]);
+  }
+
+  saveToBank(ctx, idea) {
+    const entry = labIdeaForBank(idea);
+    if (looksCredential([entry.title, entry.pitch, entry.next].join(" "))) {
+      return "Не сохранено: в идее есть что-то похожее на пароль, ключ или номер карты.";
+    }
+    const result = getStore().change((data) => bank.addIdea(data, bank.scopeKey(ctx.chatId, ctx.userId), entry, Date.now()));
+    if (!result.ok) return BANK_REFUSALS[result.error] || "Идея не сохранена. Попробуй позже.";
+    return `📚 Идея в банке: «${result.idea.title}», код ${result.id}${result.updated ? " (такое название уже было — идея обновлена)" : ""}.\n` +
+      `Посмотреть: /ideas. Вернуться к ней в лаборатории: /lab ${result.id}`;
+  }
+
+  async showIdeas(ctx, ideas) {
+    this.session(ctx, { mode: "ideas_result", ideas });
+    await this.screen(ctx, "💡 Идеи (гипотезы, без проверки рынка)\n\n" + ideas.map((idea, i) =>
+      `${i + 1}. ${idea.title}\n${idea.problem}\nДля кого: ${idea.audience}\nВвод: ${idea.input}\nРезультат: ${idea.output}\nMVP: ${idea.mvp.join("; ")}\nСтек: ${idea.stack}\nТрудоёмкость: ${idea.effort}\nПроверка пользы: ${idea.validation}\nОграничения: ${idea.limitations}\nМонетизация: ${idea.monetization}`).join("\n\n"),
+    [...ideas.map((idea, i) => button(`Выбрать ${i + 1}`, "idea", null, i)), BACK]);
   }
 
   async guard(ctx, task) {
@@ -183,11 +264,7 @@ class LabTelegram {
         const event = `msg:${msg.message_id}`;
         if (current.mode === "ideas_input") {
           await this.progress(ctx);
-          const ideas = await this.service.ideas(ctx, event, value);
-          this.session(ctx, { mode: "ideas_result", ideas });
-          await this.screen(ctx, "💡 Идеи (гипотезы, без проверки рынка)\n\n" + ideas.map((idea, i) =>
-            `${i + 1}. ${idea.title}\n${idea.problem}\nДля кого: ${idea.audience}\nВвод: ${idea.input}\nРезультат: ${idea.output}\nMVP: ${idea.mvp.join("; ")}\nСтек: ${idea.stack}\nТрудоёмкость: ${idea.effort}\nПроверка пользы: ${idea.validation}\nОграничения: ${idea.limitations}\nМонетизация: ${idea.monetization}`).join("\n\n"),
-          [...ideas.map((idea, i) => button(`Выбрать ${i + 1}`, "idea", null, i)), BACK]);
+          await this.showIdeas(ctx, await this.service.ideas(ctx, event, value));
         } else if (current.mode === "experiment_input") {
           if (value.startsWith("{")) {
             const spec = this.service.prepareExperiment(value);
@@ -235,10 +312,11 @@ class LabTelegram {
   }
 
   async selectedIdea(ctx, idea, plan = null, projectId = null) {
-    const body = `${idea.title}\n${idea.problem}\n${plan ? JSON.stringify(plan, null, 2) : "Выбери следующий шаг."}`;
+    const body = `${idea.title}\n${idea.problem}\n${plan ? formatPlan(plan) : "Выбери следующий шаг."}`;
     await this.screen(ctx, body, [button("План первой версии", "plan", projectId), button("Уточнить идею", "refine", projectId),
       button("Разобрать слабые места", "critique", projectId), button("Создать мини-инструмент", "idea_tool", projectId),
-      ...(!projectId ? [button("Сохранить в проект", "save")] : [button("Экспорт JSON", "export", projectId), button("Удалить проект…", "delete", projectId)]), BACK]);
+      ...(!projectId ? [button("Сохранить в проект", "save")] : [button("Экспорт JSON", "export", projectId), button("Удалить проект…", "delete", projectId)]),
+      ...(BANK_ENABLED ? [button("📚 В банк идей", "to_bank", projectId)] : []), BACK]);
   }
 
   async experimentPreview(ctx, spec, existingId = null) {
@@ -298,7 +376,39 @@ class LabTelegram {
       case "exit": this.leave(ctx); return this.bot.sendMessage(ctx.chatId, "Обычный чат включён.");
       case "ideas":
         this.session(ctx, { mode: "ideas_input" });
-        return this.screen(ctx, "💡 Опиши, кому нужна программа, что она должна решать, твои навыки и доступное время. Например: три идеи для магазина, знаю JavaScript, есть выходные.", [BACK]);
+        return this.screen(ctx, "💡 Опиши, кому нужна программа, что она должна решать, твои навыки и доступное время. Например: три идеи для магазина, знаю JavaScript, есть выходные.\n" +
+          "Нет задачи? «🎲 Искра» подбросит случайную: до подтверждения запроса к AI не будет.", [button("🎲 Искра", "lab_spark"), BACK]);
+      case "lab_spark": {
+        // The spark is drawn by code through the chat's spark history, like /spark; the model is asked only after a yes.
+        let drawn = null;
+        try { drawn = sparkHistory.draw(ctx.chatId, systemRng); } catch { drawn = null; }
+        if (!drawn?.ok) throw new Error("LAB_SPARK_FAILED");
+        const card = `${formatSpark(drawn.sparks[0])}\n${formatTechnique(drawn.technique)}`;
+        this.session(ctx, { mode: "spark_preview", request: `Три идеи небольших программ вокруг случайной искры.\n${card}` });
+        return this.screen(ctx, `🎲 Искра\n${card}\n\nСделать три идеи программ вокруг этой искры? 1 генерация.`,
+          [button("Сделать 3 идеи", "spark_ideas"), button("🎲 Другая искра", "lab_spark"), BACK]);
+      }
+      case "spark_ideas": {
+        if (current?.mode !== "spark_preview") throw new Error("LAB_NOT_FOUND");
+        await this.progress(ctx);
+        return this.showIdeas(ctx, await this.service.ideas(ctx, eventId, current.request));
+      }
+      case "bank_ideas": {
+        const idea = current?.mode === "bank_preview" && current.code === action.value ? this.bankEntry(ctx, action.value) : null;
+        if (!idea) throw new Error("LAB_NOT_FOUND");
+        await this.progress(ctx);
+        return this.showIdeas(ctx, await this.service.ideas(ctx, eventId, bankIdeaRequest(idea)));
+      }
+      case "to_bank": {
+        const source = entityId ? this.service.get(ctx, "projects", entityId) : current;
+        if (!BANK_ENABLED || !source?.idea) throw new Error("LAB_NOT_FOUND");
+        return this.screen(ctx, this.saveToBank(ctx, source.idea), [
+          entityId ? button("← К проекту", "project", entityId) : button("← К идее", "idea_back"), BACK]);
+      }
+      case "idea_back": {
+        if (current?.mode !== "idea_selected") throw new Error("LAB_NOT_FOUND");
+        return this.selectedIdea(ctx, current.idea, current.plan, current.projectId);
+      }
       case "idea": {
         if (current?.mode !== "ideas_result" || !current.ideas[action.value]) throw new Error("LAB_NOT_FOUND");
         const idea = current.ideas[action.value]; this.session(ctx, { mode: "idea_selected", idea });
@@ -379,7 +489,7 @@ class LabTelegram {
         await this.progress(ctx);
         const artifact = await this.service.artifact(ctx, eventId, current.spec);
         await this.download(ctx, artifact);
-        return this.screen(ctx, `Файл сформирован: ${artifact.filename}\n${artifact.instructions}\nПримеры: ${JSON.stringify(artifact.examples)}\n` +
+        return this.screen(ctx, `Файл сформирован: ${artifact.filename}\n${artifact.instructions}\nПримеры:\n${formatExamples(artifact.examples)}\n` +
           "Проверено: формат и ограничения. Код ботом не выполнялся; примеры модели требуют проверки.\n" + artifact.validation,
         [button("Скачать повторно", "download", artifact.id), BACK]);
       }
@@ -439,18 +549,47 @@ class LabTelegram {
     if (!this.service.active.size) this.service.close();
   }
 
-  // Called on /logout and /login. The login itself is already revoked in memory, so a store problem here is only logged.
+  // Idempotent, and it writes only when there is something to close: every logout and login of anyone calls it, and a
+  // store.change() for a person who never opened the lab would add an empty scope (the file allows at most 1000).
+  // The login itself is already revoked in memory, so a store problem here is only logged.
   revokeUser(userId) {
     const ctx = { chatId: userId, userId };
     this.service.cancel(ctx);
     this.sessions.delete(`${userId}:${userId}`);
     try {
-      if (fs.existsSync(this.service.store.filename)) {
-        this.service.store.change(ctx, (scope) => { scope.callbacks = []; scope.view = null; scope.session = null; });
+      if (!fs.existsSync(this.service.store.filename)) return;
+      const scope = this.service.data(ctx);
+      if (scope.session || scope.view || scope.callbacks.length) {
+        this.service.store.change(ctx, (current) => { current.callbacks = []; current.view = null; current.session = null; });
       }
     } catch (error) {
       this.reportUnavailable(error);
     }
+  }
+
+  // One line for /status, only in the private chat (the lab exists only there). Reading never creates the file.
+  statusLines({ chatId, userId, isPrivate }) {
+    if (!isPrivate || String(chatId) !== String(userId)) return null;
+    const limit = CONFIG.AI_LAB_DAILY_REQUESTS;
+    if (!fs.existsSync(this.service.store.filename)) return `Лаборатория: генераций сегодня 0 из ${limit}, проектов 0`;
+    const scope = this.service.data({ chatId, userId });
+    const used = scope.quota?.day === new Date().toISOString().slice(0, 10) ? scope.quota.used : 0;
+    return `Лаборатория: генераций сегодня ${used} из ${limit}, проектов ${scope.projects.length}`;
+  }
+
+  // The person's lab for /export, the same content as «Экспорт лаборатории»; nothing when the lab was never used.
+  exportData(userId) {
+    if (!fs.existsSync(this.service.store.filename)) return undefined;
+    const data = JSON.parse(this.service.exportAll({ chatId: userId, userId }));
+    return [data.projects, data.tracks, data.experiments, data.artifacts].some((list) => list.length) ? data : undefined;
+  }
+
+  lifecycleHooks() {
+    return {
+      revokeUser: (userId) => this.revokeUser(userId),
+      statusLines: (context) => this.statusLines(context),
+      exportData: ({ userId }) => this.exportData(userId)
+    };
   }
 }
 
@@ -469,4 +608,4 @@ function registerLab(bot) {
   return lab;
 }
 
-module.exports = { registerLab, LabTelegram };
+module.exports = { registerLab, LabTelegram, formatPlan, formatExamples, labIdeaForBank, bankIdeaRequest };

@@ -180,6 +180,20 @@ test("голос -> текст -> ответ: расшифровка доход�
   });
 });
 
+test("U5: голосовое идёт общим конвейером ответа — сбой ИИ после расшифровки даёт текст ошибки ИИ, как у текста", async () => {
+  await withApp({}, async ({ tg, or }) => {
+    tg.addFile("v-ai-down", "voice/ai-down.oga", Buffer.alloc(4000, 2));
+    or.stt = () => ({ status: 200, body: { text: "придумай что-нибудь" } });
+    or.chat = () => failure(400, "bad request");
+    tg.message({ chatId: 4016, voice: VOICE("v-ai-down", 4000) });
+    await tg.waitFor(() => tg.texts().length >= 1, 10000, "сообщение об ошибке");
+    await tg.quiet(150);
+
+    assert.equal(or.sttRequests().length, 1);
+    assert.deepEqual(tg.texts(), ["Не получилось получить ответ от ИИ. Попробуй ещё раз чуть позже."]);
+  });
+});
+
 test("голос: ошибка авторизации не размножается на 5 запросов с полным аудио (F021)", async () => {
   await withApp({}, async ({ tg, or }) => {
     tg.addFile("v-401", "voice/401.oga", Buffer.alloc(200000, 7));

@@ -23,6 +23,8 @@ npm run check            # lint + test
 - Ошибки HTTP-клиентов наружу сервисов выходят как `ApiError` (`toSafeError`), никогда не сырой `AxiosError`: в нём лежат ключ и диалог.
 - Переменные окружения читаются только в `src/config.js` (`buildConfig`). Новую переменную добавлять туда, в `.env.example` и в README. Исключение: `src/utils/logger.js` и `redact.js` лежат ниже `config` в графе зависимостей (сам `config` пишет предупреждения через логгер) и читают `LOG_LEVEL`, `LOG_MESSAGES` и значения секретов лениво; сами `LOG_*` при этом проверяются в `buildConfig`, а булевы значения разбирает общий `src/utils/parse.js`.
 - Не коммитить `.env`, `*.session`, `memory.json*`. Не печатать содержимое этих файлов.
+- Новый модуль с данными человека или чата экспортирует хуки (`forgetChat`, `revokeUser`, `statusLines`, `exportData`) и регистрируется одной строкой в `registerLifecycle` (`src/bot.js`), а не правками `/reset`, `/status`, выхода и экспорта по отдельности (`src/lifecycle.js`). Отзыв доступа — только через `auth.logout()`: он вызывает `lifecycle.revokeUser`.
+- Inline-кнопки под ответами бота — через реестр `src/handlers/actions.js` (`actions.create`, обработчик вида в `registerActions` в `src/commands.js`), префикс `act:`. Не занимать `menu:`, `lab:`, `access:`, `account:`. Ответ на нажатие, которому нужна модель, идёт через `answerWithAi` с `callbackMessage(query)`.
 - Не писать в исходники невидимые символы и `\u`-последовательности внутри регулярок: для таких символов использовать `String.fromCodePoint` (проверяет `tests/unit/source-hygiene.test.js`).
 
 ### Ключевые файлы

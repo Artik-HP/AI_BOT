@@ -60,6 +60,40 @@ test("страница: значение, похожее на шаблон, не
   assert.ok(html.includes("<title>{{COMMANDS}} —"), "имя осталось буквальным текстом");
 });
 
+test("/api/spark: код искры разбирается в ту же искру; ссылка на бота со start=spark_<код> — только при PUBLIC_BOT_URL", async () => {
+  const { decodeSpark } = require("../../src/ideas/code");
+  const withLink = await serve();
+  const plain = await serve({ config: { ...CONFIG, PUBLIC_BOT_URL: "" } });
+
+  try {
+    const payload = await (await withLink.get("/api/spark")).json();
+    const decoded = decodeSpark(payload.code);
+
+    assert.equal(decoded.ok, true);
+    assert.deepEqual(payload.ingredients.map(({ key, value }) => [key, value]), Object.entries(decoded.spark));
+    assert.equal(payload.technique.id, decoded.technique.id);
+    assert.equal(payload.link, `https://t.me/bublik_ideas_bot?start=spark_${payload.code}`);
+
+    const bare = await (await plain.get("/api/spark?shape=minimal")).json();
+
+    assert.match(bare.code, /^[0-9][A-Za-z0-9_-]{7}$/);
+    assert.equal(Object.hasOwn(bare, "link"), false);
+  } finally {
+    await withLink.close();
+    await plain.close();
+  }
+});
+
+test("страница: строка кода и ссылка «Развить в Telegram» есть в разметке, скрыты до первой искры, адрес ставит скрипт", () => {
+  const html = renderPage(TEMPLATE, CONFIG);
+  const js = fs.readFileSync(path.join(PUBLIC_DIR, "app.js"), "utf8");
+
+  assert.match(html, /<p class="spark-code" id="spark-code" hidden>Код искры: <code id="code"><\/code> <a class="spark-link" id="spark-link" rel="noopener" hidden>Развить в Telegram<\/a><\/p>/);
+  assert.match(js, /payload\.link\.startsWith\("https:\/\/"\)/, "ссылка принимается только https");
+  assert.match(js, /codeText\.textContent = /, "код — только как текст");
+  assert.doesNotMatch(js, /innerHTML/);
+});
+
 test("страница показывает все приёмы каталога и все команды бота — теми же словами, что и бот", () => {
   const html = renderPage(TEMPLATE, CONFIG);
 

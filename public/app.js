@@ -7,6 +7,9 @@
   const rollButton = document.getElementById("roll");
   const copyButton = document.getElementById("copy");
   const note = document.getElementById("spark-note");
+  const codeLine = document.getElementById("spark-code");
+  const codeText = document.getElementById("code");
+  const botLink = document.getElementById("spark-link");
   const shapeButtons = Array.from(document.querySelectorAll("[data-shape]"));
 
   if (!spark || !slots || !rollButton) {
@@ -37,6 +40,29 @@
     slots.replaceChildren(...payload.ingredients.map(({ label, value }) => slot(label, value)));
     technique.textContent = `Приём «${payload.technique.name}»: ${payload.technique.how}`;
     note.textContent = "";
+    showCode(payload);
+  }
+
+  // The code continues this spark in the bot (/spark код). The link is used only if it is an https address.
+  function showCode(payload) {
+    if (!codeLine || !codeText) {
+      return;
+    }
+
+    codeText.textContent = typeof payload.code === "string" ? payload.code : "";
+    codeLine.hidden = !codeText.textContent;
+
+    if (botLink) {
+      const usable = typeof payload.link === "string" && payload.link.startsWith("https://");
+
+      if (usable) {
+        botLink.href = payload.link;
+      } else {
+        botLink.removeAttribute("href");
+      }
+
+      botLink.hidden = !usable;
+    }
   }
 
   async function load() {

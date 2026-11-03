@@ -83,9 +83,15 @@ function createSparkHistory({ maxChats = MAX_CHATS, ttlMs = TTL_MS, now = Date.n
 // change a spark the person saw on the card.
 const sparkHistory = createSparkHistory();
 
+// Registered in src/bot.js (src/lifecycle.js): which sparks the chat saw lately is memory of the talk as well.
+const lifecycleHooks = {
+  forgetChat: (chatId) => sparkHistory.forget(chatId)
+};
+
 module.exports = {
   RECENT_SPARKS,
   RECENT_TECHNIQUES,
   createSparkHistory,
+  lifecycleHooks,
   sparkHistory
 };

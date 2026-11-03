@@ -1,5 +1,5 @@
 const logger = require("../utils/logger");
-const { comparableText, sanitizeInline } = require("../utils/text");
+const { comparableText, sanitizeInline, searchText, searchTokens } = require("../utils/text");
 const { parseArgs } = require("./args");
 const R = require("./rules");
 const { SPECS, updateCharacter, getCharacter } = require("./characters");
@@ -7,6 +7,7 @@ const { withHint } = require("./hints");
 const { scheduleReminder } = require("./reminders");
 const { looksSecret } = require("./secrets");
 const { getStore } = require("./store");
+const bank = require("../ideas/bank");
 const { IDEA_TOOL_DEFINITIONS, IDEA_HANDLERS } = require("../ideas/tools");
 const { sparkHistory } = require("../ideas/recent");
 
@@ -155,7 +156,8 @@ const TOOL_DEFINITIONS = [
         properties: {
           text: { type: "string", description: "What to remind about" },
           in_minutes: { type: "integer", minimum: 1, maximum: 525600 },
-          at: { type: "string", description: "For example 2026-10-30T09:00:00+03:00" }
+          at: { type: "string", description: "For example 2026-10-30T09:00:00+03:00" },
+          idea_id: { type: "string", description: "Optional: the 8-character code of a saved idea this reminder is about (from idea_save or idea_list). The reminder then shows the idea and its next step, and goes away if the idea is deleted" }
         },
         required: ["text"]
       }
@@ -410,11 +412,7 @@ function memorySave(args, ctx) {
   });
 }
 
-// Russian endings vary ("играю", "играть"), so longer words are compared by their stem.
-function stemOf(word) {
-  return word.length > 5 ? word.slice(0, word.length - 2) : word;
-}
-
+// The same tokens and normalization as the idea bank (utils/text.js): stems of longer words, "ё" as "е".
 function memorySearch(args, ctx) {
   const parsed = parseArgs(args, SEARCH_SPEC);
 
@@ -422,13 +420,13 @@ function memorySearch(args, ctx) {
     return invalid(parsed);
   }
 
-  const tokens = (parsed.value.query || "").toLowerCase().match(/[\p{L}\p{N}]{2,}/gu)?.map(stemOf) || [];
+  const tokens = searchTokens(parsed.value.query);
 
   return ctx.store.view((data) => {
     const list = data.facts[factScope(ctx)] || [];
     const scored = list.map((fact) => ({
       fact,
-      score: tokens.filter((token) => fact.text.toLowerCase().includes(token)).length
+      score: tokens.filter((token) => searchText(fact.text).includes(token)).length
     }));
     const hits = tokens.length ? scored.filter((entry) => entry.score > 0) : scored;
 
@@ -468,12 +466,41 @@ function forgetChat(store, chatId) {
   }).removed;
 }
 
+// Every saved fact about one person, in all chats, for /export: { [chatId]: [{ text, saved }] } or undefined.
+function factsOf(store, userId) {
+  return store.view((data) => {
+    const chats = {};
+
+    for (const [scope, list] of Object.entries(data.facts)) {
+      const chatId = bank.chatOfScope(scope, userId);
+
+      if (chatId !== null && list.length) {
+        chats[chatId] = list.map((fact) => ({ text: fact.text, saved: new Date(fact.at).toISOString().slice(0, 10) }));
+      }
+    }
+
+    return Object.keys(chats).length ? chats : undefined;
+  });
+}
+
+// Registered in src/bot.js (src/lifecycle.js) when the functions are on: /reset forgets the facts saved in the chat,
+// /export lists them.
+const lifecycleHooks = {
+  forgetChat: (chatId) => {
+    forgetChat(getStore(), chatId);
+  },
+  exportData: ({ userId }) => factsOf(getStore(), userId)
+};
+
 const REMINDER_SPEC = {
   text: { type: "string", min: 1, max: 200, required: true },
   in_minutes: { type: "int", min: 1, max: 525600 },
-  at: { type: "string", min: 10, max: 40 }
+  at: { type: "string", min: 10, max: 40 },
+  idea_id: { type: "string", min: 1, max: 24 }
 };
 
+// The idea code is cleaned like everywhere in the bank ("#A1B2C3D4", "a1b2c3d4."); something that is no code at all
+// is looked up as is and simply not found.
 function reminderCreate(args, ctx) {
   const parsed = parseArgs(args, REMINDER_SPEC);
 
@@ -481,7 +508,10 @@ function reminderCreate(args, ctx) {
     return invalid(parsed);
   }
 
-  return ctx.store.change((data) => scheduleReminder(data, ctx, parsed.value));
+  const { idea_id: rawIdea, ...request } = parsed.value;
+  const ideaId = rawIdea === undefined ? null : bank.normalizeId(rawIdea) || rawIdea;
+
+  return ctx.store.change((data) => scheduleReminder(data, ctx, { ...request, ideaId }));
 }
 
 const HANDLERS = {
@@ -554,5 +584,7 @@ module.exports = {
   executeTool,
   recentFacts,
   forgetChat,
+  factsOf,
+  lifecycleHooks,
   looksSecret
 };

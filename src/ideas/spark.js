@@ -84,6 +84,11 @@ function hasPool(pools, ingredient) {
 // even the classic shape cannot be built, it throws: a one-line "spark" is worse than none, and the callers
 // (idea_spark, the card, the website) already turn an exception into a polite refusal.
 function composeSpark(pools, rng, { shape, avoid = NOTHING_AVOIDED } = {}) {
+  // The area is mandatory even when a trimmed catalog still has several other ingredients.
+  if (!hasPool(pools, "domain")) {
+    throw new Error("SPARK_POOLS_TOO_SMALL");
+  }
+
   let ingredients = (shape ? shapeNamed(shape) : pickShape(rng)).ingredients.filter((ingredient) => hasPool(pools, ingredient));
 
   if (ingredients.length < 2) {

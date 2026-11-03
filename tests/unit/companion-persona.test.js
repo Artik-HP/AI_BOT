@@ -24,6 +24,21 @@ function loadMemory(env = {}, file = null) {
   return { file: target, memory };
 }
 
+test("U3: BOT_TIMEZONE — к «Сейчас» добавлено время пояса бота со смещением (зимой и летом) и строка, что это не пояс собеседника", () => {
+  const { buildCompanionPrompt, buildPersonaPrompt } = loadPersona({ BOT_TIMEZONE: "Europe/Kyiv" });
+  const winter = buildCompanionPrompt(someMemory(), { now: new Date(Date.UTC(2026, 0, 15, 22, 30)) }).content;
+  const summer = buildPersonaPrompt("ideas", someMemory(), { now: new Date(Date.UTC(2026, 6, 15, 10, 0)) }).content;
+
+  assert.match(winter, /\nСейчас: 2026-01-15 22:30 UTC, четверг; по поясу бота Europe\/Kyiv \(UTC\+02:00\): 2026-01-16 00:30, пятница\n/);
+  assert.match(summer, /\nСейчас: 2026-07-15 10:00 UTC, среда; по поясу бота Europe\/Kyiv \(UTC\+03:00\): 2026-07-15 13:00, среда\n/);
+  assert.match(summer, /\nПояс бота — не обязательно пояс собеседника: время по нему бери, только если человек сам сказал, что живёт по этому времени\.\n/);
+
+  const plain = loadPersona({ BOT_TIMEZONE: undefined }).buildCompanionPrompt(someMemory(), { now: NOW }).content;
+
+  assert.match(plain, /\nСейчас: 2026-10-29 19:05 UTC, четверг\n/, "без пояса — побайтно как раньше");
+  assert.doesNotMatch(plain, /по поясу бота|Пояс бота/);
+});
+
 test("промпт собеседника: текст автора без изменений, подставлено только имя бота", () => {
   const { loadPrompt } = loadPersona({ COMPANION_NAME: "Бублик" });
   const text = loadPrompt();

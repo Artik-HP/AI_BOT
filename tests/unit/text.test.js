@@ -1,6 +1,15 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { cutSafely, sanitizeInline, splitMessage, trimLineEnds } = require("../../src/utils/text");
+const { cutSafely, sanitizeInline, splitMessage, trimLineEnds, searchTokens, searchText } = require("../../src/utils/text");
+
+test("searchTokens: нижний регистр, «ё» как «е», слова от двух знаков, у длинных слов основа без двух последних", () => {
+  assert.deepEqual(searchTokens("Ёлочная ЯРМАРКА во дворе"), ["елочн", "ярмар", "во", "дворе"]);
+  assert.deepEqual(searchTokens("ёлка, ЕЛКА; ёж"), ["елка", "елка", "еж"]);
+  assert.deepEqual(searchTokens("3D-печать и 42 кота"), ["3d", "печа", "42", "кота"]);
+  assert.deepEqual(searchTokens("а я"), [], "однобуквенные слова не ищутся");
+  assert.deepEqual([searchTokens(""), searchTokens(null), searchTokens(undefined)], [[], [], []]);
+  assert.equal(searchText("Ёлочная Ярмарка"), "елочная ярмарка", "текст, по которому ищут, нормализуется тем же правилом");
+});
 
 const stripSpace = (text) => text.replace(/\s+/g, "");
 const char = (codePoint) => String.fromCodePoint(codePoint);

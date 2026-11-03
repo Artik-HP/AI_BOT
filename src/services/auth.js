@@ -5,6 +5,13 @@ const CONFIG = require("../config");
 const { isOwner, checkRateLimit, shouldSendNotice, buildNoticeText } = require("./access");
 const scrypt = promisify(crypto.scrypt);
 const HASH_PATTERN = /^scrypt\$16384\$8\$1\$[a-f0-9]{32}\$[a-f0-9]{64}$/;
+// The only /start payload kept across a login: a spark from the website. Its code is checked by the consumer.
+const START_PAYLOAD = /^spark_[A-Za-z0-9_-]{1,32}$/;
+
+function startPayloadOf(text) {
+  const payload = String(text || "").match(/^\/start(?:@\w+)?\s+(\S+)\s*$/i)?.[1] || null;
+  return payload && START_PAYLOAD.test(payload) ? payload : null;
+}
 
 async function hashPassword(password) {
   if (typeof password !== "string" || password.length < 6 || password.length > 256) throw new Error("AUTH_PASSWORD_LENGTH");
@@ -26,9 +33,14 @@ class PasswordAuth {
     this.globalFailures = [];
     this.pending = new Set();
     this.challenges = new Map();
+    // What a /start link asked for (spark_<код>) while the person still had to log in: memory only, same deadline.
+    this.startPayloads = new Map();
     this.epochs = new Map();
     this.secret = crypto.randomBytes(32);
     this.accountPolicy = null;
+    // Called by every logout: /logout, /login, a block through /access and any later path. src/bot.js points it at
+    // lifecycle.revokeUser, so all of them close the same sessions, buttons and menus.
+    this.onRevoke = null;
   }
 
   configured() { return HASH_PATTERN.test(this.hash || ""); }
@@ -48,12 +60,30 @@ class PasswordAuth {
     const key = String(userId);
     this.sessions.delete(key);
     this.challenges.delete(key);
+    this.startPayloads.delete(key);
     if (this.pending.has(key)) this.epochs.set(key, null);
+    // The session is closed first: a failing revocation hook must not keep access open.
+    try {
+      Promise.resolve(this.onRevoke?.(key)).catch(() => {});
+    } catch {
+      // lifecycle.revokeUser logs its own failures and never throws; a plain handler may.
+    }
   }
-  challenge(userId) {
+  challenge(userId, payload = null) {
     if (!this.validId(userId)) return;
     this.prune();
-    if (this.challenges.size < 10000) this.challenges.set(String(userId), this.now() + 10 * 60000);
+    if (this.challenges.size >= 10000) return;
+    const until = this.now() + 10 * 60000;
+    this.challenges.set(String(userId), until);
+    if (payload && START_PAYLOAD.test(payload)) this.startPayloads.set(String(userId), { payload, until });
+    else this.startPayloads.delete(String(userId));
+  }
+  // Once, after a successful login; null when there was none or the challenge expired.
+  takeStartPayload(userId) {
+    const key = String(userId);
+    const entry = this.startPayloads.get(key);
+    this.startPayloads.delete(key);
+    return entry && entry.until > this.now() ? entry.payload : null;
   }
   awaiting(userId) { return (this.challenges.get(String(userId)) || 0) > this.now(); }
   isCredentialText(text) {
@@ -67,6 +97,7 @@ class PasswordAuth {
     const now = this.now();
     for (const [key, session] of this.sessions) if (session.expires <= now) this.sessions.delete(key);
     for (const [key, until] of this.challenges) if (until <= now) this.challenges.delete(key);
+    for (const [key, entry] of this.startPayloads) if (entry.until <= now) this.startPayloads.delete(key);
     for (const [key, value] of this.failures) if (value.until <= now) this.failures.delete(key);
     this.globalFailures = this.globalFailures.filter((at) => at > now - this.lockMs);
   }
@@ -117,6 +148,7 @@ class PasswordAuth {
 const auth = new PasswordAuth();
 let onLogin = async () => {};
 function setLoginHandler(handler) { onLogin = handler; }
+function setRevokeHandler(handler) { auth.onRevoke = handler; }
 const AUTH_LEASE = Symbol("authenticated-message");
 const context = new AsyncLocalStorage();
 function runWithLease(lease, task) { return context.run(lease, task); }
@@ -159,7 +191,7 @@ async function passwordGate(bot, msg) {
     return false;
   }
   if (/^\/start(?:@\w+)?(?:\s|$)/i.test(msg.text || "")) {
-    auth.challenge(userId);
+    auth.challenge(userId, startPayloadOf(msg.text));
     await bot.sendMessage(msg.chat.id, "🔐 Введите пароль для доступа к боту.", { reply_markup: { remove_keyboard: true } });
     return false;
   }
@@ -171,7 +203,8 @@ async function passwordGate(bot, msg) {
   await bot.deleteMessage(msg.chat.id, msg.message_id).catch(() => {});
   if (result.ok) {
     await bot.sendMessage(msg.chat.id, "✅ Вход выполнен. Доступ открыт до выхода, истечения сессии или перезапуска бота.");
-    await onLogin(msg);
+    // The handler gets the deleted password message only for its chat and author, never its text or id.
+    await onLogin(msg, auth.takeStartPayload(userId));
   } else {
     const response = result.reason === "database" ? "Учёт пользователей временно недоступен. Обратись к администратору." :
       result.reason === "blocked" ? "Доступ к этому аккаунту отключён или срок доступа истёк." :
@@ -182,19 +215,19 @@ async function passwordGate(bot, msg) {
   return false;
 }
 
-function registerAuth(bot, onAuthenticated, onLogout = () => {}) {
+// What a logout revokes is not listed here: auth.logout() calls the revocation handler (setRevokeHandler).
+function registerAuth(bot, onAuthenticated) {
   const { safeHandler } = require("../utils/safe");
   const { claimIncomingMessage, isAddressedToThisBot } = require("./telegram");
   setLoginHandler(onAuthenticated);
   bot.onText(/^\/(login|logout)(?:@\w+)?(?:\s|$)/i, safeHandler("Authentication command", async (msg, match) => {
     if (msg.from?.is_bot || !isAddressedToThisBot(msg.text) || !claimIncomingMessage(msg)) return;
     auth.logout(msg.from?.id);
-    onLogout(msg.from?.id);
     if (match[1].toLowerCase() === "logout") {
       await bot.sendMessage(msg.chat.id, "🔒 Вы вышли. Для входа отправь /start.", { reply_markup: { remove_keyboard: true } });
     } else await passwordGate(bot, { ...msg, text: "/start" });
   }));
 }
 
-module.exports = { auth, PasswordAuth, hashPassword, HASH_PATTERN, passwordGate, captureMessage, messageAuthorized, setLoginHandler, registerAuth,
-  runWithLease, withMessageAuth, checkContext };
+module.exports = { auth, PasswordAuth, hashPassword, HASH_PATTERN, startPayloadOf, passwordGate, captureMessage, messageAuthorized, setLoginHandler, setRevokeHandler,
+  registerAuth, runWithLease, withMessageAuth, checkContext };

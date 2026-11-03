@@ -1,6 +1,7 @@
 const path = require("path");
 const logger = require("./utils/logger");
 const { parseBoolean } = require("./utils/parse");
+const { isValidTimeZone } = require("./utils/time");
 
 const ACCOUNT_ASSISTANT_MODES = ["approval", "auto", "dry-run"];
 const COMPANION_PERSONAS = ["ideas", "companion", "classic"];
@@ -161,6 +162,22 @@ function readUrl(env, name, fallback, warn) {
   }
 }
 
+// An IANA zone name (Europe/Kyiv). Empty means UTC, exactly as before the setting existed.
+function readTimeZone(env, name, warn) {
+  const raw = clean(env, name);
+
+  if (!raw) {
+    return "";
+  }
+
+  if (isValidTimeZone(raw)) {
+    return raw;
+  }
+
+  warn(`${name}: «${raw}» не часовой пояс IANA (например, Europe/Kyiv), время показывается в UTC`);
+  return "";
+}
+
 function buildConfig(env = process.env, warn = logger.warn) {
   const owner = {
     botToBot: readChatId(env, ["BOT_TO_BOT_OWNER_CHAT_ID"], warn),
@@ -193,6 +210,7 @@ function buildConfig(env = process.env, warn = logger.warn) {
     HOST: readEnum(env, "HOST", ["127.0.0.1", "0.0.0.0", "::1", "::"], "127.0.0.1", warn),
     PRODUCT_NAME: productName,
     PUBLIC_BOT_URL: readUrl(env, "PUBLIC_BOT_URL", "", warn),
+    BOT_TIMEZONE: readTimeZone(env, "BOT_TIMEZONE", warn),
     HEALTH_TOKEN: clean(env, "HEALTH_TOKEN"),
     STT_LANGUAGE: readString(env, "OPENROUTER_STT_LANGUAGE", undefined, warn),
     MAX_AUDIO_BYTES: readBytes(env, "MAX_AUDIO_BYTES", 25 * 1024 * 1024, warn),

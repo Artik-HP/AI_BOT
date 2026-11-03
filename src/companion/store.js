@@ -9,12 +9,12 @@ const { writeFileAtomic } = require("../utils/atomicFile");
 // must not take the characters with it. Single process, synchronous writes: a successful tool call is on disk.
 
 const VERSION = 1;
-const MAP_KEYS = ["characters", "retired", "ledger", "games", "facts", "ideas"];
+const MAP_KEYS = ["characters", "retired", "ledger", "games", "facts", "ideas", "daily"];
 
-// `ideas` was added after the first release; a file written without it still opens, because validate() fills
-// missing keys from this object, so no version bump or migration is needed.
+// `ideas` and `daily` (the daily spark, one entry per person) were added after the first release; a file written
+// without them still opens, because validate() fills missing keys from this object, so no version bump or migration.
 function emptyData() {
-  return { version: VERSION, characters: {}, retired: {}, ledger: {}, games: {}, facts: {}, ideas: {}, reminders: [] };
+  return { version: VERSION, characters: {}, retired: {}, ledger: {}, games: {}, facts: {}, ideas: {}, daily: {}, reminders: [] };
 }
 
 function isPlainObject(value) {

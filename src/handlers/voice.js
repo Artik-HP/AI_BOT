@@ -3,16 +3,14 @@ const CONFIG = require("../config");
 const logger = require("../utils/logger");
 const { safeHandler, trySendMessage } = require("../utils/safe");
 const { transcribeAudio } = require("../services/openrouter");
-const { respond } = require("../companion/engine");
 const {
   claimIncomingMessage,
   enqueueChatTask,
   downloadTelegramFile,
-  getBotToBotReplyOptions,
-  isFileTooLargeError,
-  sendAIResponse
+  isFileTooLargeError
 } = require("../services/telegram");
 const { admitMessage, showTyping, messageAuthorized } = require("./guard");
+const { replyWithAi } = require("./reply");
 const { withMessageAuth } = require("../services/auth");
 
 const AUDIO_ERROR_MESSAGE = "Не получилось обработать голосовое сообщение. Попробуй ещё раз или отправь покороче.";
@@ -75,6 +73,9 @@ function getAudioFormat(file) {
   return extension || "ogg";
 }
 
+// Download and transcription, then the same reply step as a text message (handlers/reply.js), all in one chat task.
+// A failed download or transcription throws to the caller (AUDIO_ERROR_MESSAGE); a failed AI answer after a good
+// transcript is handled by replyWithAi and reads like the text error (AI_ERROR_MESSAGE).
 async function handleAudioMessage(bot, chatId, msg, audio) {
   if (!messageAuthorized(msg)) return;
   await showTyping(bot, chatId);
@@ -88,12 +89,7 @@ async function handleAudioMessage(bot, chatId, msg, audio) {
     ? `Voice message transcript: ${transcript}\nCaption: ${caption}`
     : transcript;
 
-  const aiReply = await respond(chatId, userText, msg.from, {
-    type: msg.chat?.type,
-    onRound: () => showTyping(bot, chatId)
-  });
-  if (!messageAuthorized(msg)) return;
-  await sendAIResponse(chatId, aiReply, { sourceMessageId: msg.message_id, ...getBotToBotReplyOptions(msg) });
+  await replyWithAi(bot, msg, userText);
 }
 
 function registerVoiceHandler(bot) {
