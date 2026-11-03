@@ -1,0 +1,1 @@
+RESULT {"id":"S3b-detail","utf16Length":4097,"codePoints":4096,"lastCodePoints":["U+61","U+1F400"],"sentEmoji_U1F600":"U+1F600","originalEmojiSurvivedWhole":false,"endsWithU1F400_rat":true}

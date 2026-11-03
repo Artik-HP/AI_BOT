@@ -1,89 +1,43 @@
-## AGENTS.md — Инструкции для AI-агентов
+## AGENTS.md — инструкции для AI-агентов
 
-Коротко: минимальная инструкция для AI-кодировщиков, чтобы быстро понять, как запускать и где смотреть ключевые части проекта.
+Проект: Telegram-бот на Node.js (CommonJS, Node 20+). Подробности — в `README.md` и `ARCHITECTURE.md`.
 
-Проект
-- Тип: Node.js (CommonJS)
-- Вход: `index.js`
-
-Как запускать (на основе `package.json`):
-- `npm start` — запуск приложения (`index.js`).
-- `npm run userbot` — запуск `scripts/userbot.js` (альтернативный режим/демон).
-- `npm run telegram:session` — вспомогательный скрипт для создания сессии Telegram (`scripts/create-telegram-session.js`).
-- `npm run web` — локальная веб-панель на 127.0.0.1:12723 без Telegram polling; Node.js 22.13+.
-- Реестр команд: `src/commandSystem/registry.js`; инвентарь и проверки: `docs/command-system-report.md`.
-- Тесты новых команд изолируют `COMMAND_DB_FILE` и `MEMORY_FILE`. SQLite содержит личные заметки и черновики: не выводи содержимое базы.
-
-Как запускать локально (шаги):
-1. Скопируйте `.env.example` (или создайте `.env`) в корне проекта.
-2. Установите зависимости:
+### Команды
 
 ```bash
-npm install
+cp .env.example .env     # заполнить BOT_TOKEN и OPENROUTER_API_KEY (заглушки не принимаются)
+npm ci
+npm start                # бот (index.js)
+npm run userbot          # userbot (scripts/userbot.js)
+npm run telegram:session # создать TELEGRAM_STRING_SESSION
+npm run lint             # ESLint
+npm test                 # unit + интеграционные тесты (интернет не нужен)
+npm run check            # lint + test
 ```
 
-3. Создайте файл `.env` со следующими переменными (пример):
+### Правила для изменений
 
-```env
-# Telegram
-BOT_TOKEN=process.env.BOT_TOKEN
+- Тесты обязательны: каждое исправление или поведение покрывается тестом в `tests/`. Интеграционные тесты запускают настоящий бот против фейков Telegram/OpenRouter (`tests/helpers`).
+- Логи — только через `src/utils/logger.js` (`console.*` запрещён линтером). Секреты, токены и тексты сообщений в лог не писать.
+- Любой обработчик событий Telegram оборачивается в `safeHandler` (`src/utils/safe.js`): ошибка в async-обработчике иначе роняет процесс.
+- Ошибки HTTP-клиентов наружу сервисов выходят как `ApiError` (`toSafeError`), никогда не сырой `AxiosError`: в нём лежат ключ и диалог.
+- Переменные окружения читаются только в `src/config.js` (`buildConfig`). Новую переменную добавлять туда, в `.env.example` и в README. Исключение: `src/utils/logger.js` и `redact.js` лежат ниже `config` в графе зависимостей (сам `config` пишет предупреждения через логгер) и читают `LOG_LEVEL`, `LOG_MESSAGES` и значения секретов лениво; сами `LOG_*` при этом проверяются в `buildConfig`, а булевы значения разбирает общий `src/utils/parse.js`.
+- Не коммитить `.env`, `*.session`, `memory.json*`. Не печатать содержимое этих файлов.
+- Не писать в исходники невидимые символы и `\u`-последовательности внутри регулярок: для таких символов использовать `String.fromCodePoint` (проверяет `tests/unit/source-hygiene.test.js`).
 
-# OpenRouter / LLM
-OPENROUTER_API_KEY=process.env.OPENROUTER_API_KEY
+### Ключевые файлы
 
-# Дополнительно (по желанию)
-# PORT=12722
-# MAX_AUDIO_BYTES=26214400
-```
+- `index.js` — вход; `src/bot.js` — сборка, Express, остановка.
+- `src/config.js` — окружение и валидация; `src/commands.js` — команды и меню.
+- `src/handlers/` — `text`, `voice`, `photo`, `guard` (допуск и лимиты).
+- `src/services/` — `telegram`, `openrouter`, `memory`, `access`, `accountAssistant`.
+- `src/utils/` — `logger`, `errors`, `redact`, `text`, `queue`, `ttlSet`, `safe`.
+- `src/ideas/` — генератор идей (характер по умолчанию): `prompt.md`, `catalog.js` (пулы искр, приёмы), `spark.js` (формы искры `SPARK_SHAPES`; новый ингредиент = пул в `SPARK_POOLS` + `INGREDIENT_POOLS` + подпись в `SPARK_LABELS`), `recent.js` (недавние искры чата: только память процесса), `bank.js`, `tools.js` (функции модели), `commands.js` (команды и кнопки: из него строятся меню Telegram, `/help` и сайт). `src/handlers/ideas.js` — их обработчики, `src/handlers/reply.js` — общий ответ ИИ (его использует и текстовый обработчик).
+- `src/site.js` + `public/` — сайт на `/` и `GET /api/spark`. Только статика без секретов под строгим CSP: без инлайн-стилей и скриптов, без внешних адресов.
+- Функция модели добавляется в `HANDLERS` и в набор своего характера (`toolsFor` в `src/companion/tools.js`), её имя — в промпте этого характера: договор «промпт ↔ код» проверяют тесты. У каждого нового кода отказа должна быть подсказка модели: `hint` в ответе или запись в `src/companion/hints.js` (проверяет `tests/unit/companion-hints.test.js`).
+- `scripts/` — `userbot.js`, `create-telegram-session.js`.
+- `audit-reports/` — отчёты аудита; старые отчёты не удалять и не переписывать.
 
-4. Запустите бота в режиме по умолчанию:
+### Обязательные переменные
 
-```bash
-npm start
-```
-
-Или для работы пользовательского режима:
-
-```bash
-npm run userbot
-```
-
-Краткая проверка конфигурации:
-- Telegram требует `BOT_TOKEN`. OpenRouter нужен для AI-команд; локальные игры, инструменты, заметки и standalone веб-панель запускаются без AI-ключа.
-- Если `src/config.js` сообщает об ошибке валидации, проверьте `.env` на пустые значения и повторно запустите `npm start` после исправления.
-- Если `npm install` или `npm start`/`npm run userbot` завершается ошибкой, сначала проверьте `.env`, затем повторите `npm install`, и только после этого читайте консольные логи и `src/config.js` для диагностики.
-- Логи ошибок печатаются в консоль при запуске.
-
-Тесты
-- `npm test` — локальные тесты схемы, кнопок, истории, потокового парсинга и регрессий. Внешние API в этих тестах заменены транспортами для проверок ошибок; память изолирована во временном каталоге.
-- `npm run check` — проверка синтаксиса JavaScript. Отдельной сборки и проверки TypeScript в этом CommonJS-проекте нет.
-- `npm run test:live:interactive` — реальные платные запросы OpenRouter с ключом из `.env`; тестовая память хранится отдельно.
-- `node scripts/check-interactive-telegram.js --chat-id ID` — реальная проверка нажатий, только для явно разрешённого пользователем личного чата. Использует временную память, временный polling и останавливает его по завершении. Не запускайте одновременно с работающим polling-процессом этого бота.
-
-Ключевые файлы и директории
-- `index.js` — главный файл запуска.
-- `scripts/` — вспомогательные сценарии (`userbot.js`, `create-telegram-session.js`).
-- `src/bot.js` — логика бота (инициализация, обработчики сообщений).
-- `src/commands.js` — регистрация команд и обработка UI/меню.
-- `src/services/` — интеграции с внешними API (OpenRouter, Telegram, память и т.д.).
-- `src/handlers/` — обработчики типов сообщений (voice, text, photo).
-- `src/utils/` — утилиты и логгирование.
-- `src/config.js` — конфигурация через переменные окружения; содержит `validateConfig()`.
-
-Обязательные переменные окружения (из `src/config.js`)
-- `BOT_TOKEN` — токен Telegram-бота (обязателен).
-- `OPENROUTER_API_KEY` — ключ OpenRouter (для AI-команд).
-
-Конвенции
-- CommonJS модули (`type: "commonjs"` в `package.json`).
-- Переменные окружения используются через `.env` / `process.env`.
-
-Если не хватает документации
-- Реестр, схема и границы тестирования описаны в `docs/command-system-report.md` и `docs/command-catalog.md`.
-
-Дальнейшие шаги (предложения)
-- Добавить `CONTRIBUTING.md` или `ARCHITECTURE.md`, если нужно описать более сложные границы проекта.
-- Добавить тесты и CI-процедуры по мере готовности.
-
----
-Автоматически сгенерировано для удобства AI-агентов. Если нужно более подробное содержание — скажите, какую область документировать.
+`BOT_TOKEN` (вид `123456789:AAH...`) и `OPENROUTER_API_KEY`. Без них или с заглушками `validateConfig()` останавливает запуск и перечисляет все проблемы.

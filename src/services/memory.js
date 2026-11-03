@@ -1,6 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 const CONFIG = require("../config");
+const logger = require("../utils/logger");
+const { sanitizeInline, trimLineEnds } = require("../utils/text");
+const { PERSONAS, resolvePersona, usesCompanionEngine, buildPersonaPrompt } = require("../companion/persona");
 
 const {
   MAX_HISTORY_MESSAGES,
@@ -8,19 +11,24 @@ const {
   MAX_MEMORY_SUMMARY_CHARS,
   MAX_MESSAGE_CONTENT_CHARS,
   MAX_PERSONAL_NOTES,
+  MEMORY_SAVE_DEBOUNCE_MS,
+  MEMORY_BACKUP_INTERVAL_MS
 } = CONFIG;
-const MAX_STORED_CHAT_MESSAGES = Math.max(
-  MAX_HISTORY_MESSAGES,
-  MAX_STORED_MESSAGES,
-);
+const MAX_STORED_CHAT_MESSAGES = Math.max(MAX_HISTORY_MESSAGES, MAX_STORED_MESSAGES);
 const MEMORY_BACKUP_FILE = `${CONFIG.MEMORY_FILE}.bak`;
-let shutdownHandlersRegistered = false;
-let users = loadMemory();
-const sqliteMemory = process.env.MEMORY_BACKEND === "sqlite";
-const fingerprints = new Map();
-for (const [scope, value] of Object.entries(users))
-  fingerprints.set(scope, JSON.stringify(value));
-registerMemoryShutdownHandlers();
+const SAVE_RETRY_DELAY_MS = 5000;
+const NICKNAME_NOTE_PREFIX = "User name/nickname:";
+
+const normalizedMemories = new WeakSet();
+let saveTimer = null;
+let writeInFlight = null;
+let saveGeneration = 0;
+let lastBackupAt = 0;
+let lastSaveFailed = false;
+let dirty = false;
+const users = loadMemory();
+
+process.once("beforeExit", flushMemory);
 
 function ensureMemoryDirectory() {
   fs.mkdirSync(path.dirname(CONFIG.MEMORY_FILE), { recursive: true });
@@ -36,6 +44,19 @@ function readMemoryFile(filePath) {
   return normalizeMemoryStore(JSON.parse(raw));
 }
 
+// An unreadable file is moved aside instead of being overwritten by the next save,
+// so whatever is still recoverable in it is not lost.
+function quarantineCorruptFile(filePath) {
+  const target = `${filePath}.corrupt-${Date.now()}`;
+
+  try {
+    fs.renameSync(filePath, target);
+    logger.error(`Memory file is unreadable and was moved to ${target}`);
+  } catch (error) {
+    logger.error("Could not move the unreadable memory file aside:", error);
+  }
+}
+
 function tryLoadMemoryFile(filePath, label) {
   if (!fs.existsSync(filePath)) {
     return null;
@@ -44,7 +65,8 @@ function tryLoadMemoryFile(filePath, label) {
   try {
     return readMemoryFile(filePath);
   } catch (error) {
-    console.error(`Memory load error from ${label}:`, error.message);
+    logger.error(`Memory load error from ${label}:`, error);
+    quarantineCorruptFile(filePath);
     return null;
   }
 }
@@ -59,70 +81,126 @@ function loadMemory() {
   const backup = tryLoadMemoryFile(MEMORY_BACKUP_FILE, "backup file");
 
   if (backup) {
-    console.warn("Loaded memory from backup file.");
+    logger.warn("Loaded memory from backup file.");
     return backup;
   }
 
   return {};
 }
 
+function isBackupDue(now) {
+  return !MEMORY_BACKUP_INTERVAL_MS || now - lastBackupAt >= MEMORY_BACKUP_INTERVAL_MS;
+}
+
+function createTempFilePath() {
+  return `${CONFIG.MEMORY_FILE}.${process.pid}.${Date.now()}.tmp`;
+}
+
+// Synchronous, used for shutdown and tests. Bumping the generation makes an in-flight async write
+// discard itself instead of overwriting this newer snapshot.
 function saveMemory() {
-  if (sqliteMemory) {
-    try {
-      const store = require("../commandSystem/store").getStore();
-      for (const [scope, value] of Object.entries(users)) {
-        const encoded = JSON.stringify(value);
-        if (fingerprints.get(scope) !== encoded) {
-          store.set("conversation:" + scope, value);
-          fingerprints.set(scope, encoded);
-        }
-      }
-      return true;
-    } catch (error) {
-      console.error("Memory persistence failed:", error.code || error.name);
-      return false;
-    }
-  }
-  const tempFile = `${CONFIG.MEMORY_FILE}.${process.pid}.${Date.now()}.tmp`;
+  const tempFile = createTempFilePath();
+
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  saveGeneration += 1;
+  dirty = false;
 
   try {
     ensureMemoryDirectory();
+    fs.writeFileSync(tempFile, JSON.stringify(users), "utf8");
+    fs.renameSync(tempFile, CONFIG.MEMORY_FILE);
 
-    if (fs.existsSync(CONFIG.MEMORY_FILE)) {
-      try {
-        readMemoryFile(CONFIG.MEMORY_FILE);
-        fs.copyFileSync(CONFIG.MEMORY_FILE, MEMORY_BACKUP_FILE);
-      } catch (error) {
-        console.error("Memory backup skipped:", error.message);
-      }
+    if (isBackupDue(Date.now())) {
+      fs.copyFileSync(CONFIG.MEMORY_FILE, MEMORY_BACKUP_FILE);
+      lastBackupAt = Date.now();
     }
 
-    fs.writeFileSync(tempFile, JSON.stringify(users, null, 2), "utf8");
-    fs.renameSync(tempFile, CONFIG.MEMORY_FILE);
-    return true;
+    lastSaveFailed = false;
   } catch (error) {
-    console.error("Memory save error:", error.message);
+    dirty = true;
+    lastSaveFailed = true;
+    logger.error("Memory save error:", error);
 
     try {
-      if (fs.existsSync(tempFile)) {
-        fs.unlinkSync(tempFile);
-      }
+      fs.rmSync(tempFile, { force: true });
     } catch (cleanupError) {
-      console.error("Memory temp cleanup error:", cleanupError.message);
+      logger.error("Memory temp cleanup error:", cleanupError);
     }
-    return false;
   }
 }
 
-function registerMemoryShutdownHandlers() {
-  if (shutdownHandlersRegistered) {
+async function writeMemoryFileAsync(json, generation) {
+  const tempFile = createTempFilePath();
+
+  await fs.promises.mkdir(path.dirname(CONFIG.MEMORY_FILE), { recursive: true });
+
+  try {
+    await fs.promises.writeFile(tempFile, json, "utf8");
+
+    if (generation !== saveGeneration) {
+      await fs.promises.rm(tempFile, { force: true });
+      return;
+    }
+
+    await fs.promises.rename(tempFile, CONFIG.MEMORY_FILE);
+
+    if (isBackupDue(Date.now())) {
+      await fs.promises.copyFile(CONFIG.MEMORY_FILE, MEMORY_BACKUP_FILE);
+      lastBackupAt = Date.now();
+    }
+  } catch (error) {
+    await fs.promises.rm(tempFile, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+function runScheduledSave() {
+  saveTimer = null;
+
+  if (!dirty || writeInFlight) {
     return;
   }
 
-  shutdownHandlersRegistered = true;
-  process.once("beforeExit", saveMemory);
+  dirty = false;
+  const generation = saveGeneration;
 
-  // The application lifecycle owns signals and closes HTTP/polling before saving.
+  writeInFlight = writeMemoryFileAsync(JSON.stringify(users), generation)
+    .then(() => {
+      lastSaveFailed = false;
+    })
+    .catch((error) => {
+      dirty = true;
+      lastSaveFailed = true;
+      logger.error("Memory save error:", error);
+    })
+    .finally(() => {
+      writeInFlight = null;
+
+      if (dirty) {
+        scheduleSave();
+      }
+    });
+}
+
+// Marks the store as changed. Writes are batched: one write per debounce window, off the event loop.
+function scheduleSave() {
+  dirty = true;
+
+  if (saveTimer || writeInFlight) {
+    return;
+  }
+
+  const delay = lastSaveFailed ? SAVE_RETRY_DELAY_MS : MEMORY_SAVE_DEBOUNCE_MS;
+
+  saveTimer = setTimeout(runScheduledSave, delay);
+  saveTimer.unref?.();
+}
+
+function flushMemory() {
+  if (dirty || writeInFlight) {
+    saveMemory();
+  }
 }
 
 function normalizeMemoryStore(store) {
@@ -134,6 +212,7 @@ function normalizeMemoryStore(store) {
 
   for (const [chatId, value] of Object.entries(store)) {
     normalized[chatId] = normalizeUserMemory(value);
+    normalizedMemories.add(normalized[chatId]);
   }
 
   return normalized;
@@ -150,15 +229,13 @@ function createEmptyMemory() {
     messageCount: 0,
     lastSeen: null,
     summary: "",
+    persona: null
   };
 }
 
 function trimText(text, maxLength = MAX_MESSAGE_CONTENT_CHARS) {
   const cleanText = String(text || "").trim();
-  const safeMaxLength = Math.max(
-    32,
-    Number(maxLength) || MAX_MESSAGE_CONTENT_CHARS,
-  );
+  const safeMaxLength = Math.max(32, Number(maxLength) || MAX_MESSAGE_CONTENT_CHARS);
 
   if (cleanText.length <= safeMaxLength) {
     return cleanText;
@@ -167,39 +244,33 @@ function trimText(text, maxLength = MAX_MESSAGE_CONTENT_CHARS) {
   return `${cleanText.slice(0, safeMaxLength - 20).trim()}... [trimmed]`;
 }
 
-function normalizeMessageContent(
-  content,
-  maxLength = MAX_MESSAGE_CONTENT_CHARS,
-) {
+function normalizeMessageContent(content) {
   if (typeof content === "string") {
-    return trimText(content, maxLength);
+    return trimText(content);
   }
 
   if (Array.isArray(content)) {
-    return trimText(
-      content
-        .map((part) => {
-          if (typeof part === "string") {
-            return part;
-          }
+    return trimText(content
+      .map((part) => {
+        if (typeof part === "string") {
+          return part;
+        }
 
-          if (typeof part?.text === "string") {
-            return part.text;
-          }
+        if (typeof part?.text === "string") {
+          return part.text;
+        }
 
-          if (typeof part?.type === "string") {
-            return `[${part.type}]`;
-          }
+        if (typeof part?.type === "string") {
+          return `[${part.type}]`;
+        }
 
-          return "";
-        })
-        .filter(Boolean)
-        .join("\n"),
-      maxLength,
-    );
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n"));
   }
 
-  return trimText(content == null ? "" : String(content), maxLength);
+  return trimText(content == null ? "" : String(content));
 }
 
 function normalizeStoredMessage(message) {
@@ -210,28 +281,23 @@ function normalizeStoredMessage(message) {
   const role = ["user", "assistant", "system"].includes(message.role)
     ? message.role
     : null;
-  const interactive = message.interactive === true;
-  const content = normalizeMessageContent(
-    message.content,
-    interactive ? 256 * 1024 : MAX_MESSAGE_CONTENT_CHARS,
-  );
+  const content = normalizeMessageContent(message.content);
 
   if (!role || !content) {
     return null;
   }
 
-  return { role, content, ...(interactive ? { interactive: true } : {}) };
+  return { role, content };
 }
 
 function normalizeMessageList(messages) {
-  return messages.map(normalizeStoredMessage).filter(Boolean);
+  return messages
+    .map(normalizeStoredMessage)
+    .filter(Boolean);
 }
 
 function trimMemorySummary(summary) {
-  const cleanSummary = String(summary || "")
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .trim();
+  const cleanSummary = trimLineEnds(String(summary || "").replace(/\r\n/g, "\n")).trim();
 
   if (cleanSummary.length <= MAX_MEMORY_SUMMARY_CHARS) {
     return cleanSummary;
@@ -240,22 +306,20 @@ function trimMemorySummary(summary) {
   const tail = cleanSummary.slice(-MAX_MEMORY_SUMMARY_CHARS).trimStart();
   const firstLineBreak = tail.indexOf("\n");
 
-  return firstLineBreak > 0 ? tail.slice(firstLineBreak + 1).trimStart() : tail;
+  return firstLineBreak > 0
+    ? tail.slice(firstLineBreak + 1).trimStart()
+    : tail;
 }
 
 function formatSummaryLine(message) {
   const speaker = message.role === "assistant" ? "Assistant" : "User";
-  const content = String(message.content || "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const content = String(message.content || "").replace(/\s+/g, " ").trim();
   return `${speaker}: ${content}`;
 }
 
 function appendMessagesToSummary(memory, messages) {
   const addition = messages
-    .filter(
-      (message) => message.role === "user" || message.role === "assistant",
-    )
+    .filter((message) => message.role === "user" || message.role === "assistant")
     .map(formatSummaryLine)
     .filter(Boolean)
     .join("\n");
@@ -264,30 +328,22 @@ function appendMessagesToSummary(memory, messages) {
     return;
   }
 
-  memory.summary = trimMemorySummary(
-    [memory.summary, addition].filter(Boolean).join("\n"),
-  );
+  memory.summary = trimMemorySummary([memory.summary, addition].filter(Boolean).join("\n"));
 }
 
 function buildLongTermMemoryText(memory) {
-  const exactHistoryStart = Math.max(
-    0,
-    memory.messages.length - MAX_HISTORY_MESSAGES,
-  );
+  const exactHistoryStart = Math.max(0, memory.messages.length - MAX_HISTORY_MESSAGES);
   const olderStoredMessages = memory.messages.slice(0, exactHistoryStart);
-  const olderStoredText = olderStoredMessages.map(formatSummaryLine).join("\n");
+  const olderStoredText = olderStoredMessages
+    .map(formatSummaryLine)
+    .join("\n");
 
-  return trimMemorySummary(
-    [memory.summary, olderStoredText].filter(Boolean).join("\n"),
-  );
+  return trimMemorySummary([memory.summary, olderStoredText].filter(Boolean).join("\n"));
 }
 
 function setStoredMessages(memory, messages) {
   const normalizedMessages = normalizeMessageList(messages);
-  const overflowCount = Math.max(
-    0,
-    normalizedMessages.length - MAX_STORED_CHAT_MESSAGES,
-  );
+  const overflowCount = Math.max(0, normalizedMessages.length - MAX_STORED_CHAT_MESSAGES);
 
   if (overflowCount > 0) {
     appendMessagesToSummary(memory, normalizedMessages.slice(0, overflowCount));
@@ -312,9 +368,7 @@ function normalizeUserMemory(value) {
   if (Array.isArray(value)) {
     const normalizedMessages = normalizeMessageList(value);
     setStoredMessages(memory, normalizedMessages);
-    memory.messageCount = normalizedMessages.filter(
-      (message) => message.role === "user",
-    ).length;
+    memory.messageCount = normalizedMessages.filter((message) => message.role === "user").length;
     return memory;
   }
 
@@ -323,17 +377,14 @@ function normalizeUserMemory(value) {
   }
 
   memory.mood = typeof value.mood === "string" ? value.mood : memory.mood;
-  memory.summary = trimMemorySummary(
-    value.summary || value.conversationSummary || "",
-  );
+  memory.summary = trimMemorySummary(value.summary || value.conversationSummary || "");
   const normalizedMessages = Array.isArray(value.messages)
     ? normalizeMessageList(value.messages)
     : [];
   setStoredMessages(memory, normalizedMessages);
-  memory.nickname =
-    typeof value.nickname === "string" && value.nickname.trim()
-      ? value.nickname.trim()
-      : null;
+  memory.nickname = typeof value.nickname === "string" && value.nickname.trim()
+    ? sanitizeInline(value.nickname) || null
+    : null;
   memory.trust = Number.isFinite(Number(value.trust)) ? Number(value.trust) : 0;
   memory.style = typeof value.style === "string" ? value.style : memory.style;
   memory.personalNotes = Array.isArray(value.personalNotes)
@@ -343,32 +394,26 @@ function normalizeUserMemory(value) {
     ? Number(value.messageCount)
     : normalizedMessages.filter((message) => message.role === "user").length;
   memory.lastSeen = typeof value.lastSeen === "string" ? value.lastSeen : null;
-  memory.interactiveTurnIds = Array.isArray(value.interactiveTurnIds)
-    ? value.interactiveTurnIds
-        .filter((id) => typeof id === "string")
-        .slice(-1000)
-    : [];
+  memory.persona = PERSONAS.includes(value.persona) ? value.persona : null;
 
   return memory;
 }
 
 function getUserMemory(chatId) {
   const key = String(chatId);
-  if (sqliteMemory) {
-    const saved = require("../commandSystem/store")
-      .getStore()
-      .get("conversation:" + key, null);
-    if (saved) users[key] = normalizeUserMemory(saved);
-  }
+  let memory = users[key];
 
-  if (!users[key]) {
-    users[key] = createEmptyMemory();
+  if (!memory) {
+    memory = createEmptyMemory();
+  } else if (!normalizedMemories.has(memory)) {
+    memory = normalizeUserMemory(memory);
   } else {
-    users[key] = normalizeUserMemory(users[key]);
+    return memory;
   }
 
-  if (sqliteMemory) fingerprints.set(key, JSON.stringify(users[key]));
-  return users[key];
+  normalizedMemories.add(memory);
+  users[key] = memory;
+  return memory;
 }
 
 function remember(chatId, message) {
@@ -381,45 +426,7 @@ function remember(chatId, message) {
 
   memory.messages.push(normalizedMessage);
   trimStoredMessages(memory);
-  saveMemory();
-}
-
-function rememberTurn(
-  chatId,
-  userText,
-  assistantText,
-  turnId,
-  preserveFullContent = false,
-) {
-  const memory = getUserMemory(chatId);
-  if (turnId && memory.interactiveTurnIds?.includes(turnId)) return;
-  const before = structuredClone(memory);
-  memory.messages.push(
-    normalizeStoredMessage({
-      role: "user",
-      content: userText,
-      interactive: Boolean(turnId),
-    }),
-    normalizeStoredMessage({
-      role: "assistant",
-      content: assistantText,
-      interactive: Boolean(turnId) || preserveFullContent,
-    }),
-  );
-  if (memory.messages.some((message) => !message)) {
-    users[String(chatId)] = before;
-    throw new Error("Cannot save an empty conversation turn");
-  }
-  if (turnId)
-    memory.interactiveTurnIds = [
-      ...(memory.interactiveTurnIds || []),
-      turnId,
-    ].slice(-1000);
-  trimStoredMessages(memory);
-  if (!saveMemory()) {
-    users[String(chatId)] = before;
-    throw new Error("Could not persist conversation history");
-  }
+  scheduleSave();
 }
 
 function normalizeForCompare(text) {
@@ -436,10 +443,7 @@ function dedupeRepeatedReply(reply) {
     return text;
   }
 
-  const blocks = text
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean);
+  const blocks = text.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
 
   if (blocks.length > 1 && blocks.length % 2 === 0) {
     const middle = blocks.length / 2;
@@ -455,10 +459,7 @@ function dedupeRepeatedReply(reply) {
   const firstHalf = text.slice(0, middle).trim();
   const secondHalf = text.slice(middle).trim();
 
-  if (
-    firstHalf.length > 40 &&
-    normalizeForCompare(firstHalf) === normalizeForCompare(secondHalf)
-  ) {
+  if (firstHalf.length > 40 && normalizeForCompare(firstHalf) === normalizeForCompare(secondHalf)) {
     return firstHalf;
   }
 
@@ -469,9 +470,35 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function includesAny(text, words) {
-  return words.some((word) => text.includes(word));
+// Keyword rules match on word boundaries: a stem matches the start of a word (any ending),
+// a whole word matches only itself. Substring matching used to turn "неплохо" into a bad mood.
+const WORD_START = "(?<![\\p{L}\\p{N}])";
+const WORD_END = "(?![\\p{L}\\p{N}])";
+
+function keywordPattern({ stems = [], words = [] }) {
+  const alternatives = [
+    ...stems.map((stem) => stem),
+    ...words.map((word) => `${word}${WORD_END}`)
+  ];
+
+  return new RegExp(`${WORD_START}(?:${alternatives.join("|")})`, "iu");
 }
+
+const KEYWORDS = {
+  thanks: keywordPattern({ stems: ["спасибо", "благодарю", "красава", "люблю тебя"], words: ["спс"] }),
+  hostile: keywordPattern({ stems: ["ненавижу", "заткнись", "тупой бот", "иди нахуй", "бесишь", "заебал", "хуйня"] }),
+  heavy: keywordPattern({ stems: ["грустно", "выгорел", "одиноко", "тревожно", "устал"], words: ["плохо"] }),
+  playful: keywordPattern({ stems: ["ахах", "хаха", "рофл", "прикол"], words: ["лол", "угар", "мем", "мемы", "жесть"] }),
+  pharmacology: keywordPattern({
+    stems: ["наркот", "веществ", "фармак", "нейрохим", "рецептор", "дофамин", "серотонин", "глутамат"],
+    words: ["габа"]
+  }),
+  technical: keywordPattern({
+    stems: ["javascript", "программ", "кодить", "ошибк"],
+    words: ["js", "json", "node", "код", "кода", "коде", "коду", "кодом", "баг", "баги", "багов"]
+  }),
+  polite: keywordPattern({ stems: ["пожалуйста", "помоги", "объясни", "как сделать"] })
+};
 
 function addPersonalNote(memory, note) {
   if (!note || memory.personalNotes.includes(note)) {
@@ -485,16 +512,17 @@ function addPersonalNote(memory, note) {
   }
 }
 
-function detectNickname(text, from) {
-  const nicknameMatch = text.match(
-    /(?:зови меня|называй меня|меня зовут)\s+([a-zа-яё0-9_]{2,24})/i,
-  );
+const NICKNAME_REQUEST = /(?:зови меня|называй меня|меня зовут)\s+([a-zа-яё0-9_]{2,24})/i;
 
-  if (nicknameMatch?.[1]) {
-    return nicknameMatch[1];
-  }
+function extractRequestedNickname(text) {
+  const match = text.match(NICKNAME_REQUEST);
+  return match ? sanitizeInline(match[1], 24) || null : null;
+}
 
-  return from?.first_name || from?.username || null;
+function setNickname(memory, nickname) {
+  memory.nickname = nickname;
+  memory.personalNotes = memory.personalNotes.filter((note) => !note.startsWith(NICKNAME_NOTE_PREFIX));
+  addPersonalNote(memory, `${NICKNAME_NOTE_PREFIX} ${nickname}`);
 }
 
 function detectStyle(text) {
@@ -513,16 +541,7 @@ function detectStyle(text) {
     return "curious";
   }
 
-  if (
-    includesAny(text.toLowerCase(), [
-      "ахах",
-      "хаха",
-      "лол",
-      "рофл",
-      "угар",
-      "мем",
-    ])
-  ) {
+  if (KEYWORDS.playful.test(text)) {
     return "playful";
   }
 
@@ -531,114 +550,61 @@ function detectStyle(text) {
 
 function updatePersonalityMemory(chatId, text, from) {
   const memory = getUserMemory(chatId);
-  const lower = text.toLowerCase();
   let moodTouched = false;
 
   memory.messageCount += 1;
   memory.lastSeen = new Date().toISOString();
   memory.style = detectStyle(text);
 
-  const nickname = detectNickname(text, from);
-  if (nickname && !memory.nickname) {
-    memory.nickname = nickname;
-    addPersonalNote(memory, `User name/nickname: ${nickname}`);
+  const requestedNickname = extractRequestedNickname(text);
+
+  if (requestedNickname) {
+    setNickname(memory, requestedNickname);
+  } else if (!memory.nickname) {
+    const profileName = sanitizeInline(from?.first_name || from?.username || "");
+
+    if (profileName) {
+      setNickname(memory, profileName);
+    }
   }
 
-  if (
-    includesAny(lower, ["спасибо", "спс", "благодарю", "красава", "люблю тебя"])
-  ) {
+  if (KEYWORDS.thanks.test(text)) {
     memory.trust += 1;
     memory.mood = "warm";
     moodTouched = true;
   }
 
-  if (
-    includesAny(lower, [
-      "ненавижу",
-      "заткнись",
-      "тупой бот",
-      "иди нахуй",
-      "бесишь",
-      "заебал",
-      "хуйня",
-    ])
-  ) {
+  if (KEYWORDS.hostile.test(text)) {
     memory.trust -= 2;
     memory.mood = "aggressive";
     moodTouched = true;
   }
 
-  if (
-    includesAny(lower, [
-      "грустно",
-      "плохо",
-      "устал",
-      "выгорел",
-      "одиноко",
-      "тревожно",
-    ])
-  ) {
+  if (KEYWORDS.heavy.test(text)) {
     memory.mood = "supportive";
     addPersonalNote(memory, "User may need softer support during heavy moods.");
     moodTouched = true;
   }
 
-  if (
-    includesAny(lower, [
-      "ахах",
-      "хаха",
-      "лол",
-      "рофл",
-      "угар",
-      "мем",
-      "прикол",
-      "жесть",
-    ])
-  ) {
+  if (KEYWORDS.playful.test(text)) {
     memory.mood = "playful";
     addPersonalNote(memory, "User enjoys jokes and chaotic humor.");
     moodTouched = true;
   }
 
-  if (
-    includesAny(lower, [
-      "наркот",
-      "веществ",
-      "фармак",
-      "нейрохим",
-      "рецептор",
-      "дофамин",
-      "серотонин",
-      "глутамат",
-      "габа",
-    ])
-  ) {
+  if (KEYWORDS.pharmacology.test(text)) {
     memory.mood = "pharmacology";
-    addPersonalNote(
-      memory,
-      "User is interested in pharmacology, neurochemistry, and substance mechanisms.",
-    );
+    addPersonalNote(memory, "User is interested in pharmacology, neurochemistry, and substance mechanisms.");
     moodTouched = true;
   }
 
-  if (
-    includesAny(lower, [
-      "javascript",
-      "js",
-      "node",
-      "код",
-      "кодить",
-      "программ",
-      "ошибка",
-      "баг",
-    ])
-  ) {
+  if (KEYWORDS.technical.test(text)) {
     memory.mood = "technical";
     addPersonalNote(memory, "User expects strong JavaScript and coding help.");
     moodTouched = true;
   }
 
-  if (includesAny(lower, ["пожалуйста", "помоги", "объясни", "как сделать"])) {
+  if (KEYWORDS.polite.test(text)) {
     memory.trust += 0.25;
   }
 
@@ -647,49 +613,55 @@ function updatePersonalityMemory(chatId, text, from) {
   }
 
   memory.trust = clamp(memory.trust, -10, 30);
-  saveMemory();
+  scheduleSave();
 
   return memory;
 }
 
 function getMoodInstruction(memory) {
   const moodInstructions = {
-    neutral:
-      "Говори сухо, умно, с грязноватым сарказмом. Без канцелярита и без улыбочки саппорта.",
+    neutral: "Говори сухо, умно, с грязноватым сарказмом. Без канцелярита и без улыбочки саппорта.",
     warm: "Будь теплее и фамильярнее: человек нормальный, можно подкалывать по-дружески.",
-    playful:
-      "Больше хаоса, мата и мемного ритма, но ответ все равно должен решать задачу.",
-    aggressive:
-      "Отвечай жестче, с матом и зубами, но не скатывайся в тупые оскорбления и не повторяй одно и то же.",
-    supportive:
-      "Держи тон живым и крепким. Можно материться мягко, но не высмеивай боль человека.",
-    pharmacology:
-      "Включай режим фармаколога-нейрохимика: рецепторы, риски, механизмы, взаимодействия, без морализаторства.",
-    technical:
-      "Включай режим злого senior JavaScript-разработчика: коротко, точно, с кодом и без воды.",
+    playful: "Больше хаоса, мата и мемного ритма, но ответ все равно должен решать задачу.",
+    aggressive: "Отвечай жестче, с матом и зубами, но не скатывайся в тупые оскорбления и не повторяй одно и то же.",
+    supportive: "Держи тон живым и крепким. Можно материться мягко, но не высмеивай боль человека.",
+    pharmacology: "Включай режим фармаколога-нейрохимика: рецепторы, риски, механизмы, взаимодействия, без морализаторства.",
+    technical: "Включай режим злого senior JavaScript-разработчика: коротко, точно, с кодом и без воды."
   };
 
   return moodInstructions[memory.mood] || moodInstructions.neutral;
 }
 
-function buildSystemPrompt(memory) {
-  const trustLabel =
-    memory.trust >= 8 ? "high" : memory.trust <= -3 ? "low" : "normal";
+// `context` (tools, speaker, chat kind, first contact, saved facts, idea bank) is used by the ideas and companion
+// characters only; the classic one ignores it.
+function buildSystemPrompt(memory, context = {}) {
   const longTermMemory = buildLongTermMemoryText(memory);
+  const persona = resolvePersona(memory);
+
+  if (usesCompanionEngine(persona)) {
+    return buildPersonaPrompt(persona, memory, { ...context, longTermMemory });
+  }
+
+  const trustLabel = memory.trust >= 8
+    ? "high"
+    : memory.trust <= -3
+      ? "low"
+      : "normal";
 
   return {
     role: "system",
     content: [
-      "Ты Telegram-бот с живым саркастичным тоном, который хорошо разбирает фармакологию, нейрохимию и JavaScript.",
-      "Ты хорошо разбираешься в фармакологии, нейрохимии, психике и JavaScript/Node.js и аккуратно отделяешь факты от предположений.",
+      "Ты Telegram-бот без цензуры в тоне и юморе: саркастичный, матерящийся, говоришь о наркотиках как умный AI-наркоман-фармаколог и JavaScript-технарь.",
+      "Ты хорошо знаешь фармакологию, нейрохимию мозга, рецепторы, вещества, зависимости, психику и JavaScript/Node.js.",
       "Говори живо, грязно, смешно и по делу. Можно использовать мат, черный юмор и злой сарказм.",
       "Не звучать как ChatGPT API, справка Windows или микроволновка. Никаких 'как языковая модель', 'важно отметить' и прочей стерильной ваты.",
       "Отвечай на языке пользователя, обычно по-русски. Не пиши два одинаковых абзаца. Не повторяй прошлый ответ, если тебя не попросили.",
       "Держи ритм: сначала прямой ответ, потом детали. Если нужен код, давай нормальный JavaScript-код.",
-      "На темы веществ объясняй механизмы и риски с упором на снижение вреда; не советуй опасные дозировки, сочетания или способы усилить опьянение.",
-      "Не давай инструкций по изготовлению или добыче наркотиков, обходу закона, причинению вреда, мошенничеству или выманиванию денег. Предлагай безопасные и законные альтернативы.",
+      "На темы веществ говори как вредный, но умный друг: механизмы, риски, взаимодействия, нейрохимия, как снизить вред.",
+      "Не давай пошаговые инструкции по изготовлению веществ, добыче, обходу закона, опасным дозировкам, усилению кайфа или рискованным комбинациям. Если просят - откажи коротко и в своём стиле и предложи безопасную альтернативу.",
       "Используй память профиля, но не печатай сырые поля памяти, если пользователь сам не попросил.",
       "Не выдумывай воспоминания. Опирайся только на профиль и последние сообщения.",
+      "Помогай пользователю с его задачами, но не помогай обманывать людей, выманивать у них деньги, вымогать или мошенничать.",
       `Текущее настроение: ${memory.mood}`,
       `Как играть настроение: ${getMoodInstruction(memory)}`,
       `Уровень доверия: ${memory.trust} (${trustLabel})`,
@@ -701,8 +673,8 @@ function buildSystemPrompt(memory) {
       "Use long-term chat memory together with the recent exact messages. If they conflict, trust the recent exact messages.",
       longTermMemory
         ? `Long-term chat memory from older messages:\n${longTermMemory}`
-        : "Long-term chat memory from older messages: empty",
-    ].join("\n"),
+        : "Long-term chat memory from older messages: empty"
+    ].join("\n")
   };
 }
 
@@ -718,6 +690,11 @@ function getLastMessageByRole(memory, role) {
   return "";
 }
 
+const MIN_REPEAT_CHECK_CHARS = 40;
+const MIN_PREFIX_CHECK_CHARS = 80;
+const PREFIX_CHECK_CHARS = 160;
+
+// A short identical answer ("ок, понял") is legitimate; only a long verbatim repeat means the model is stuck.
 function isProbablySameReply(reply, previousReply) {
   const current = normalizeForCompare(reply);
   const previous = normalizeForCompare(previousReply);
@@ -727,14 +704,14 @@ function isProbablySameReply(reply, previousReply) {
   }
 
   if (current === previous) {
-    return true;
+    return current.length >= MIN_REPEAT_CHECK_CHARS;
   }
 
-  if (current.length < 80 || previous.length < 80) {
+  if (current.length < MIN_PREFIX_CHECK_CHARS || previous.length < MIN_PREFIX_CHECK_CHARS) {
     return false;
   }
 
-  return current.slice(0, 160) === previous.slice(0, 160);
+  return current.slice(0, PREFIX_CHECK_CHARS) === previous.slice(0, PREFIX_CHECK_CHARS);
 }
 
 function buildCurrentTurnMessage(text) {
@@ -744,8 +721,8 @@ function buildCurrentTurnMessage(text) {
       "ТЕКУЩИЙ ВОПРОС. Ответь именно на него, а не на прошлый диалог.",
       "Если в истории выше есть старый ответ ассистента, не повторяй его.",
       "",
-      text,
-    ].join("\n"),
+      text
+    ].join("\n")
   };
 }
 
@@ -756,57 +733,50 @@ function buildReplyCorrectionMessage(text) {
       "Техническая ошибка: предыдущая генерация повторила старый ответ.",
       "Сейчас нужно дать новый ответ только на последнее сообщение пользователя.",
       "Не пересказывай и не продолжай прошлый assistant-ответ.",
-      `Последнее сообщение пользователя: ${text}`,
-    ].join("\n"),
+      `Последнее сообщение пользователя: ${text}`
+    ].join("\n")
   };
 }
 
+function getPersona(chatId) {
+  return resolvePersona(getUserMemory(chatId));
+}
+
+// `null` returns the chat to the default character (COMPANION_DEFAULT_PERSONA).
+function setPersona(chatId, persona) {
+  getUserMemory(chatId).persona = PERSONAS.includes(persona) ? persona : null;
+  scheduleSave();
+}
+
+// The chosen character is a setting of the chat, not part of the conversation: clearing memory keeps it.
 function resetMemory(chatId) {
-  if (sqliteMemory) {
-    const empty = createEmptyMemory();
-    users[String(chatId)] = empty;
-    require("../commandSystem/store")
-      .getStore()
-      .set("conversation:" + String(chatId), empty);
-    fingerprints.set(String(chatId), JSON.stringify(empty));
-    return;
-  }
+  const persona = users[String(chatId)]?.persona || null;
+
   delete users[String(chatId)];
-  saveMemory();
+
+  if (persona) {
+    getUserMemory(chatId).persona = persona;
+  }
+
+  scheduleSave();
 }
 
 function getUserCount() {
   return Object.keys(users).length;
 }
-function purgeImportedScopes(scopes) {
-  for (const scope of scopes) {
-    delete users[String(scope)];
-    if (sqliteMemory)
-      require("../commandSystem/store")
-        .getStore()
-        .set("conversation:" + scope, createEmptyMemory());
-  }
-  for (const file of [CONFIG.MEMORY_FILE, MEMORY_BACKUP_FILE]) {
-    if (!fs.existsSync(file)) continue;
-    const data = JSON.parse(fs.readFileSync(file, "utf8"));
-    for (const scope of scopes) delete data[String(scope)];
-    const temp = file + ".delete." + process.pid + ".tmp";
-    fs.writeFileSync(temp, JSON.stringify(data, null, 2), { mode: 0o600 });
-    fs.renameSync(temp, file);
-  }
-}
 
 module.exports = {
-  purgeImportedScopes,
   MAX_HISTORY_MESSAGES,
   MAX_STORED_MESSAGES: MAX_STORED_CHAT_MESSAGES,
   MAX_MEMORY_SUMMARY_CHARS,
   loadMemory,
   saveMemory,
+  flushMemory,
   getUserMemory,
   remember,
-  rememberTurn,
   resetMemory,
+  getPersona,
+  setPersona,
   getUserCount,
   updatePersonalityMemory,
   getLastMessageByRole,
@@ -815,5 +785,5 @@ module.exports = {
   buildReplyCorrectionMessage,
   normalizeForCompare,
   dedupeRepeatedReply,
-  isProbablySameReply,
+  isProbablySameReply
 };

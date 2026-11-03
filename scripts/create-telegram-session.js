@@ -28,21 +28,24 @@ async function main() {
     connectionRetries: 5
   });
 
-  await client.start({
-    phoneNumber: () => ask("Telegram phone number (+380...): "),
-    phoneCode: () => ask("Telegram login code: "),
-    password: () => ask("Two-step password, if enabled: "),
-    onError: (error) => console.error("Telegram auth error:", error.message)
-  });
+  try {
+    await client.start({
+      phoneNumber: () => ask("Telegram phone number (+380...): "),
+      phoneCode: () => ask("Telegram login code: "),
+      password: () => ask("Two-step password, if enabled: "),
+      onError: (error) => console.error("Telegram auth error:", error.message)
+    });
 
-  const session = client.session.save();
-  console.log("");
-  console.log("Copy this line into .env:");
-  console.log(`TELEGRAM_STRING_SESSION=${session}`);
-  console.log("");
-  console.log("Keep this value private. It gives access to the Telegram account session.");
-
-  await client.disconnect();
+    const session = client.session.save();
+    console.log("");
+    console.log("Copy this line into .env (the file is git-ignored; never commit it or paste it anywhere):");
+    console.log(`TELEGRAM_STRING_SESSION=${session}`);
+    console.log("");
+    console.log("Keep this value private. It gives full access to the Telegram account.");
+    console.log("Use one session for one process: running it in two places at once makes Telegram revoke it.");
+  } finally {
+    await client.disconnect().catch(() => {});
+  }
 }
 
 main()
@@ -52,4 +55,6 @@ main()
   })
   .finally(() => {
     rl.close();
+    // gramjs keeps timers alive after a failed login; the script must still end.
+    process.exit(process.exitCode || 0);
   });

@@ -1,0 +1,4 @@
+# NEW code, same scenario, 3 runs
+memory 100 chats: delivered all 30 in 229 ms
+memory 100 chats: delivered all 30 in 233 ms
+memory 100 chats: delivered all 30 in 257 ms

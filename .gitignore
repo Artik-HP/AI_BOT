@@ -1,21 +1,38 @@
-node_modules
-memory.json
+# зависимости
+node_modules/
+
+# секреты и окружение (шаблон .env.example отслеживается)
 .env
-interactive-state.json
-interactive-state.json.*.tmp
-data/
-*.sqlite
-*.sqlite-wal
-*.sqlite-shm
-test-results/
-playwright-report/
-.local/
-artifacts/
-# Deployment packages must never include these local credentials/backups.
 .env.*
 !.env.example
+
+# сессии Telegram: это авторизованный доступ к аккаунту, в git им не место
 *.session
 *.session-journal
-memory.json.bak
-memory.json.*.tmp
+userbot.session*
+
+# данные пользователей: память бота, резервные копии и «повреждённые» файлы
+memory.json
+memory.json.*
+*.lab.json*
+*.rpg.json*
+*.corrupt-*
+
+# логи и артефакты
+*.log
+npm-debug.log*
+coverage/
+
+# личные заметки
 ПОЛЕЗНЫЕ КОДЫ, КОМАНДЫ И Т.Д.txt
+
+# рантайм-состояние и сгенерированные артефакты: базы (с -wal/-shm), config.env прогонов, копии исходников и сборок.
+# Им не место в git: в них данные пользователей и токены (см. audit-reports/AUDIT_NEW_MODULES_2026-11-03_13-28.md, N-12)
+/data/
+/.local/
+/artifacts/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+config.env

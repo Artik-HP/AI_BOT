@@ -1,37 +1,51 @@
 const path = require("path");
+const CONFIG = require("../config");
+const logger = require("../utils/logger");
+const { safeHandler, trySendMessage } = require("../utils/safe");
 const { transcribeAudio } = require("../services/openrouter");
-const { processUserText } = require("../services/conversation");
+const { respond } = require("../companion/engine");
 const {
   claimIncomingMessage,
   enqueueChatTask,
   downloadTelegramFile,
+  getBotToBotReplyOptions,
+  isFileTooLargeError,
+  sendAIResponse
 } = require("../services/telegram");
+const { admitMessage, showTyping, messageAuthorized } = require("./guard");
+const { withMessageAuth } = require("../services/auth");
 
-const AUDIO_ERROR_MESSAGE =
-  "Не смог прочитать голосовое сообщение. Попробуй короче или проверь OPENROUTER_STT_MODEL / OPENROUTER_AUDIO_MODEL и доступ к OpenRouter.";
+const AUDIO_ERROR_MESSAGE = "Не получилось обработать голосовое сообщение. Попробуй ещё раз или отправь покороче.";
+
+function buildAudioTooLargeMessage() {
+  return `Файл слишком большой. Лимит: ${Math.round(CONFIG.MAX_AUDIO_BYTES / 1024 / 1024)} МБ.`;
+}
 
 function getAudioMessage(msg) {
   if (msg.voice?.file_id) {
     return {
       fileId: msg.voice.file_id,
+      fileSize: msg.voice.file_size,
       format: "ogg",
-      source: "voice",
+      source: "voice"
     };
   }
 
   if (msg.audio?.file_id) {
     return {
       fileId: msg.audio.file_id,
+      fileSize: msg.audio.file_size,
       format: getAudioFormat(msg.audio),
-      source: "audio",
+      source: "audio"
     };
   }
 
   if (msg.document?.file_id && msg.document.mime_type?.startsWith("audio/")) {
     return {
       fileId: msg.document.file_id,
+      fileSize: msg.document.file_size,
       format: getAudioFormat(msg.document),
-      source: "document",
+      source: "document"
     };
   }
 
@@ -50,72 +64,75 @@ function getAudioFormat(file) {
     "audio/wav": "wav",
     "audio/webm": "webm",
     "audio/x-m4a": "m4a",
-    "audio/x-wav": "wav",
+    "audio/x-wav": "wav"
   }[file.mime_type];
 
   if (mimeFormat) {
     return mimeFormat;
   }
 
-  const extension = path
-    .extname(file.file_name || "")
-    .slice(1)
-    .toLowerCase();
+  const extension = path.extname(file.file_name || "").slice(1).toLowerCase();
   return extension || "ogg";
 }
 
 async function handleAudioMessage(bot, chatId, msg, audio) {
-  await bot.sendChatAction(chatId, "typing");
+  if (!messageAuthorized(msg)) return;
+  await showTyping(bot, chatId);
 
   const audioBuffer = await downloadTelegramFile(audio.fileId);
-  const transcript = await transcribeAudio(audioBuffer, audio.format,{budgetScope:msg.commandScope});
+  if (!messageAuthorized(msg)) return;
+  const transcript = await transcribeAudio(audioBuffer, audio.format);
+  if (!messageAuthorized(msg)) return;
   const caption = msg.caption?.trim();
   const userText = caption
     ? `Voice message transcript: ${transcript}\nCaption: ${caption}`
     : transcript;
 
-  await processUserText(bot, chatId, userText, msg.from, {
-    memoryScope: msg.commandScope,
+  const aiReply = await respond(chatId, userText, msg.from, {
+    type: msg.chat?.type,
+    onRound: () => showTyping(bot, chatId)
   });
+  if (!messageAuthorized(msg)) return;
+  await sendAIResponse(chatId, aiReply, { sourceMessageId: msg.message_id, ...getBotToBotReplyOptions(msg) });
 }
 
 function registerVoiceHandler(bot) {
-  bot.on("message", async (msg) => {
+  bot.on("message", safeHandler("Voice message handler", async (msg) => {
     const chatId = msg.chat.id;
     const audio = getAudioMessage(msg);
 
     if (!audio) {
       return;
     }
-    if (!(await require("../services/access").guardMessage(bot, msg))) return;
 
     if (!claimIncomingMessage(msg)) {
       return;
     }
 
-    await enqueueChatTask(chatId, async () => {
+    if (!await admitMessage(bot, msg)) {
+      return;
+    }
+
+    if (audio.fileSize && audio.fileSize > CONFIG.MAX_AUDIO_BYTES) {
+      await trySendMessage(bot, chatId, buildAudioTooLargeMessage());
+      return;
+    }
+
+    await enqueueChatTask(chatId, () => withMessageAuth(msg, async () => {
       try {
-        msg.commandScope = `t:${chatId}:${msg.from.id}`;
         await handleAudioMessage(bot, chatId, msg, audio);
       } catch (error) {
-        const status = error.response?.status;
-        const details = require("../utils/errors").getErrorDetails(error);
-
-        console.error(
-          "Audio transcription error:",
-          status,
-          details,
-          error.transcriptionErrors || "",
-        );
-        await bot.sendMessage(chatId, AUDIO_ERROR_MESSAGE).catch(() => {});
+        if (!messageAuthorized(msg)) return;
+        logger.error("Audio transcription error:", error, error.transcriptionErrors || "");
+        await trySendMessage(bot, chatId, isFileTooLargeError(error) ? buildAudioTooLargeMessage() : AUDIO_ERROR_MESSAGE);
       }
-    });
-  });
+    }));
+  }));
 }
 
 module.exports = {
   registerVoiceHandler,
   getAudioMessage,
   getAudioFormat,
-  handleAudioMessage,
+  handleAudioMessage
 };

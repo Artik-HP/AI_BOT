@@ -1,96 +1,127 @@
-const { TelegramClient } = require("telegram");
-const { StringSession } = require("telegram/sessions");
-const { NewMessage } = require("telegram/events");
 const CONFIG = require("../config");
 const logger = require("../utils/logger");
+const { safeHandler } = require("../utils/safe");
+const { createKeyedQueue } = require("../utils/queue");
+const { createTtlSet } = require("../utils/ttlSet");
+const { TELEGRAM_MESSAGE_LIMIT } = require("../utils/text");
 const { draftAccountReply } = require("./openrouter");
-const { getStore } = require("../commandSystem/store");
-const { fail } = require("../commandSystem/tools");
-const { rememberTurn } = require("./memory");
-const { splitTelegramMessage } = require("./telegram");
+const { isAddressedToThisBot } = require("./telegram");
+const { auth, runWithLease, withMessageAuth, checkContext } = require("./auth");
+const { admitMessage, admitCallback } = require("../handlers/guard");
 
-const VALID_MODES = new Set(["approval", "auto", "dry-run"]);
-const TELEGRAM_MESSAGE_LIMIT = 4096;
+const { parseBoolean } = CONFIG;
+const MAX_BURST_ITEMS = 20;
+const MAX_INCOMING_TEXT_CHARS = 3000;
+const MAX_TRACKED_CHATS = 500;
+const TASKS_GRACE_MS = 8000;
+
+// Cloud connections to the owner's own Telegram account: loaded only when the assistant is switched on.
+let clientFactory = () => {
+  const { TelegramClient } = require("telegram");
+  const { StringSession } = require("telegram/sessions");
+
+  return new TelegramClient(
+    new StringSession(CONFIG.TELEGRAM_STRING_SESSION),
+    CONFIG.TELEGRAM_API_ID,
+    CONFIG.TELEGRAM_API_HASH,
+    { connectionRetries: 5 }
+  );
+};
+let eventFilterFactory = () => {
+  const { NewMessage } = require("telegram/events");
+  return new NewMessage({ incoming: true });
+};
 
 let accountClient = null;
+let connecting = null;
+let lifecycleGeneration = 0;
+let desiredEnabled = Boolean(CONFIG.ACCOUNT_ASSISTANT_ENABLED);
 let controlBot = null;
 let started = false;
 let handlersRegistered = false;
+let autoDowngradeWarned = false;
 let accountAssistantEnabled = Boolean(CONFIG.ACCOUNT_ASSISTANT_ENABLED);
-let accountAssistantMode = String(CONFIG.ACCOUNT_ASSISTANT_MODE || "approval")
-  .trim()
-  .toLowerCase();
-let accountAssistantPrivateOnly = Boolean(
-  CONFIG.ACCOUNT_ASSISTANT_PRIVATE_ONLY,
-);
-const accountAssistantAllow = new Set(
-  CONFIG.ACCOUNT_ASSISTANT_ALLOW_CHATS.map(normalizeToken),
-);
-const accountAssistantBlock = new Set(
-  CONFIG.ACCOUNT_ASSISTANT_BLOCK_CHATS.map(normalizeToken),
-);
+let accountAssistantMode = CONFIG.ACCOUNT_ASSISTANT_MODE;
+let accountAssistantPrivateOnly = Boolean(CONFIG.ACCOUNT_ASSISTANT_PRIVATE_ONLY);
+const accountAssistantAllow = new Set(CONFIG.ACCOUNT_ASSISTANT_ALLOW_CHATS.map(normalizeToken));
+const accountAssistantBlock = new Set(CONFIG.ACCOUNT_ASSISTANT_BLOCK_CHATS.map(normalizeToken));
 
+const VALID_MODES = new Set(["approval", "auto", "dry-run"]);
 const pendingDrafts = new Map();
-const chatQueues = new Map();
+const pendingBursts = new Map();
 const lastHandledAt = new Map();
-const processedMessages = new Set();
-const savedSettings = getStore().get("account:settings", null);
-if (savedSettings) {
-  accountAssistantEnabled = savedSettings.enabled;
-  accountAssistantMode = savedSettings.mode;
-  accountAssistantPrivateOnly = savedSettings.privateOnly;
-  accountAssistantAllow.clear();
-  for (const peer of savedSettings.allow) accountAssistantAllow.add(peer);
-  accountAssistantBlock.clear();
-  for (const peer of savedSettings.block) accountAssistantBlock.add(peer);
-}
-for (const draft of getStore().get("account:drafts", [])) {
-  if (
-    Date.parse(draft.createdAt) + CONFIG.ACCOUNT_ASSISTANT_DRAFT_TTL_MS >
-    Date.now()
-  )
-    pendingDrafts.set(draft.id, {
-      ...draft,
-      deliveryUncertain: Boolean(draft.sending || draft.deliveryUncertain),
-      sending: false,
-      redrafting: false,
-    });
-}
-function persistSettings() {
-  getStore().set("account:settings", {
-    enabled: accountAssistantEnabled,
-    mode: accountAssistantMode,
-    privateOnly: accountAssistantPrivateOnly,
-    allow: [...accountAssistantAllow],
-    block: [...accountAssistantBlock],
-  });
-}
-function persistDrafts() {
-  getStore().set(
-    "account:drafts",
-    [...pendingDrafts.values()].map(({ inputChat, ...draft }) => draft),
-  );
+const enqueueChatTask = createKeyedQueue();
+const processedMessages = createTtlSet(CONFIG.PROCESSED_MESSAGE_TTL_MS);
+
+// Deterministic guard for the "auto" mode: whatever the model says, a reply that looks like
+// money, credentials, a link or contact data is never sent without the owner's approval.
+const AUTO_SEND_RISK_RULES = [
+  [/https?:\/\/|\bwww\.|\bt\.me\/|\b[a-z0-9-]+\.(?:com|ru|org|net|io|me|ua|by|kz|su)\b/i, "ссылка"],
+  [/\b(?:\d{4}[ -]?){3}\d{1,4}\b/, "номер карты"],
+  [/\d{10,}/, "длинное число"],
+  [/\+\d[\d\s().-]{8,}\d/, "номер телефона"],
+  [/\b(?:0x[a-fA-F0-9]{20,}|bc1[a-z0-9]{20,}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b/, "криптоадрес"],
+  [/\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/, "реквизиты счёта"],
+  [/парол|код\s+(?:из\s+)?(?:смс|sms)|\bcvv\b|\bcvc\b|пин-?код|seed|сид-?фраз|секретн/i, "секретные данные"],
+  [/перев(?:еди|ожу|ести|од)|деньг|одолж|займ|реквизит|оплат|(?<![\p{L}\p{N}])карт[аыуе](?![\p{L}\p{N}])|\busdt\b|\bbtc\b|биткоин|крипт/iu, "деньги"]
+];
+
+// Returns the reason a reply must not be auto-sent, or null when it looks harmless.
+function findAutoSendRisk(text) {
+  for (const [pattern, reason] of AUTO_SEND_RISK_RULES) {
+    if (pattern.test(String(text || ""))) {
+      return reason;
+    }
+  }
+
+  return null;
 }
 
-if (!VALID_MODES.has(accountAssistantMode)) {
-  accountAssistantMode = "approval";
+function normalizeToken(value) {
+  return String(value || "").trim().replace(/^@/, "").toLowerCase();
+}
+
+function normalizeId(value) {
+  return value == null ? "" : String(value);
 }
 
 function getAccountAssistantMode() {
   return accountAssistantMode;
 }
 
+// "auto" sends from the personal account without asking, so it needs a list of people it may talk to.
+function getEffectiveMode() {
+  if (accountAssistantMode === "auto" && !accountAssistantAllow.size && !CONFIG.ACCOUNT_ASSISTANT_AUTO_ALLOW_ANY) {
+    return "approval";
+  }
+
+  return accountAssistantMode;
+}
+
+function warnIfAutoDowngraded() {
+  if (getEffectiveMode() === accountAssistantMode || autoDowngradeWarned) {
+    return;
+  }
+
+  autoDowngradeWarned = true;
+  logger.warn(
+    "Режим auto работает как approval, пока пуст allow-list (ACCOUNT_ASSISTANT_ALLOW_CHATS). " +
+    "Для автоответов любым контактам задайте ACCOUNT_ASSISTANT_AUTO_ALLOW_ANY=true (небезопасно)."
+  );
+}
+
 function getAccountAssistantStatus() {
   return {
     enabled: accountAssistantEnabled,
     started,
-    connected: Boolean(accountClient?.isConnected),
+    connected: Boolean(accountClient?.connected),
     mode: getAccountAssistantMode(),
+    effectiveMode: getEffectiveMode(),
     privateOnly: accountAssistantPrivateOnly,
     pendingDrafts: pendingDrafts.size,
-    allowList: Array.from(accountAssistantAllow).join(", ") || "all",
-    blockList: Array.from(accountAssistantBlock).join(", ") || "none",
-    ownerChatIdConfigured: Boolean(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID),
+    allowListSize: accountAssistantAllow.size,
+    blockListSize: accountAssistantBlock.size,
+    ownerChatIdConfigured: Boolean(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID)
   };
 }
 
@@ -109,24 +140,11 @@ function getMissingConfig() {
     missing.push("TELEGRAM_STRING_SESSION");
   }
 
-  if (
-    getAccountAssistantMode() !== "auto" &&
-    !CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID
-  ) {
+  if (getEffectiveMode() !== "auto" && !CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID) {
     missing.push("ACCOUNT_ASSISTANT_OWNER_CHAT_ID");
   }
 
   return missing;
-}
-
-function normalizeToken(value) {
-  return String(value || "")
-    .trim()
-    .replace(/^@/, "")
-    .toLowerCase();
-}
-function normalizeId(value) {
-  return value == null ? "" : String(value);
 }
 
 function buildSenderName(sender) {
@@ -142,20 +160,18 @@ function buildSenderProfile(sender, message) {
     chatId: normalizeId(message.chatId || message.senderId || sender?.id),
     username: sender?.username || "",
     name: buildSenderName(sender),
-    isBot: Boolean(sender?.bot),
+    isBot: Boolean(sender?.bot)
   };
 }
 
+// Only stable identifiers: the display name is chosen by the sender and proves nothing.
 function getPeerKeys(profile) {
   return [
     profile.chatId,
     profile.id,
     profile.username,
-    profile.username ? `@${profile.username}` : "",
-    profile.name,
-  ]
-    .map(normalizeToken)
-    .filter(Boolean);
+    profile.username ? `@${profile.username}` : ""
+  ].map(normalizeToken).filter(Boolean);
 }
 
 function isPeerBlocked(profile) {
@@ -173,16 +189,13 @@ function isPeerAllowed(profile) {
 }
 
 function setAccountAssistantMode(mode) {
-  const cleanMode = String(mode || "")
-    .trim()
-    .toLowerCase();
+  const cleanMode = String(mode || "").trim().toLowerCase();
 
   if (!VALID_MODES.has(cleanMode)) {
     return false;
   }
 
   accountAssistantMode = cleanMode;
-  persistSettings();
   return true;
 }
 
@@ -194,7 +207,6 @@ function addPeerToSet(set, value) {
   }
 
   set.add(token);
-  persistSettings();
   return true;
 }
 
@@ -205,9 +217,7 @@ function removePeerFromSet(set, value) {
     return false;
   }
 
-  const removed = set.delete(token);
-  persistSettings();
-  return removed;
+  return set.delete(token);
 }
 
 function shouldHandlePeer(profile) {
@@ -247,11 +257,14 @@ function resolvePeer(value) {
     return null;
   }
 
-  if (/^-?\d+$/.test(raw)) {
-    return Number(raw);
-  }
+  return /^-?\d+$/.test(raw) ? Number(raw) : raw;
+}
 
-  return raw.startsWith("@") ? raw : raw;
+function describeModes() {
+  const effective = getEffectiveMode();
+  return effective === getAccountAssistantMode()
+    ? effective
+    : `${getAccountAssistantMode()} (работает как ${effective}: пуст allow-list)`;
 }
 
 function buildAccountAssistantHelpText() {
@@ -272,6 +285,9 @@ function buildAccountAssistantHelpText() {
     "/account_unallow <chatId|@username> — убрать из разрешённых",
     "/account_unblock <chatId|@username> — убрать из блок-листа",
     "/account_config — показать текущие настройки",
+    "",
+    "Режим, списки и private-only, изменённые командами, действуют до перезапуска бота.",
+    "Постоянные значения задаются в .env."
   ].join("\n");
 }
 
@@ -279,20 +295,19 @@ function buildAccountAssistantConfigText() {
   return [
     "Account assistant конфигурация:",
     `enabled: ${accountAssistantEnabled}`,
-    `mode: ${getAccountAssistantMode()}`,
+    `mode: ${describeModes()}`,
     `privateOnly: ${accountAssistantPrivateOnly}`,
     `allow list: ${formatPeerSet(accountAssistantAllow)}`,
     `block list: ${formatPeerSet(accountAssistantBlock)}`,
     `pending drafts: ${pendingDrafts.size}`,
-    `owner chat id configured: ${Boolean(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID)}`,
+    `owner chat id configured: ${Boolean(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID)}`
   ].join("\n");
 }
 
 async function sendDirectAccountMessage(chatId, text) {
+  if (!auth.authenticated(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID)) throw new Error("AUTH_REQUIRED");
   if (!accountClient) {
-    fail(
-      "Аккаунт не подключён. Используй /account_enable и проверь TELEGRAM_STRING_SESSION.",
-    );
+    throw new Error("Account client is not connected");
   }
 
   const peer = resolvePeer(chatId);
@@ -301,62 +316,24 @@ async function sendDirectAccountMessage(chatId, text) {
     throw new Error("Неверный chatId или @username");
   }
 
-  if (!String(text || "").trim()) fail("Нельзя отправить пустой текст.");
-  let sent;
-  for (const chunk of splitTelegramMessage(text))
-    sent = await accountClient.sendMessage(peer, {
-      message: chunk,
-      linkPreview: false,
-    });
-  return sent;
-}
-
-function enqueueChatTask(chatId, task) {
-  const key = String(chatId);
-  const previous = chatQueues.get(key) || Promise.resolve();
-  const next = previous
-    .catch(() => {})
-    .then(task)
-    .finally(() => {
-      if (chatQueues.get(key) === next) {
-        chatQueues.delete(key);
-      }
-    });
-
-  chatQueues.set(key, next);
-  return next;
-}
-
-function claimAccountMessage(chatId, messageId) {
-  if (!chatId || !messageId) {
-    return true;
-  }
-
-  const key = `${chatId}:${messageId}`;
-
-  if (processedMessages.has(key)) {
-    return false;
-  }
-
-  processedMessages.add(key);
-  setTimeout(
-    () => processedMessages.delete(key),
-    CONFIG.PROCESSED_MESSAGE_TTL_MS,
-  ).unref?.();
-  return true;
+  return accountClient.sendMessage(peer, {
+    message: String(text || "").trim(),
+    linkPreview: false
+  });
 }
 
 function createDraftId() {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function isOwnerMessage(msg) {
-  const ownerId = String(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID || "");
+// The owner is a person, not just a chat: in a group the chat id alone would let every member in.
+function isOwnerActor(chatId, userId) {
+  const ownerId = CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID;
+
   return Boolean(
     ownerId &&
-    msg?.chat?.type === "private" &&
-    String(msg.chat.id || "") === ownerId &&
-    String(msg.from?.id || "") === ownerId,
+    String(chatId) === String(ownerId) &&
+    userId != null && String(userId) === String(ownerId)
   );
 }
 
@@ -378,9 +355,10 @@ function buildDraftNotice(draft, title = "Новый входящий в Telegra
     "",
     `Решение AI: ${draft.sendable ? "можно отправить" : "нужно подтверждение"}`,
     `Причина: ${reason}`,
+    draft.autoBlockedReason ? `Автоотправка заблокирована: ${draft.autoBlockedReason}` : "",
     "",
-    `Свой текст: /account_reply ${draft.id} твой ответ`,
-  ].join("\n");
+    `Свой текст: /account_reply ${draft.id} твой ответ`
+  ].filter((line, index, lines) => line !== "" || lines[index - 1] !== "").join("\n");
 
   return trimText(text, TELEGRAM_MESSAGE_LIMIT);
 }
@@ -391,75 +369,64 @@ function buildDraftKeyboard(id) {
       inline_keyboard: [
         [
           { text: "Отправить", callback_data: `account:send:${id}` },
-          { text: "Редрафт", callback_data: `account:redraft:${id}` },
+          { text: "Редрафт", callback_data: `account:redraft:${id}` }
         ],
         [
           { text: "Отклонить", callback_data: `account:drop:${id}` },
-          {
-            text: "Заблокировать отправителя",
-            callback_data: `account:block:${id}`,
-          },
-        ],
-      ],
-    },
+          { text: "Заблокировать отправителя", callback_data: `account:block:${id}` }
+        ]
+      ]
+    }
   };
 }
 
+// Blocks by the stable ids as well as by the username: changing a username must not lift the block.
 function blockDraftSender(draft) {
   if (!draft) {
     return false;
   }
 
-  const target = draft.username || draft.chatId;
+  const targets = [draft.senderId, draft.username].filter(Boolean);
 
-  if (!target) {
-    return false;
+  if (!targets.length && draft.chatId) {
+    targets.push(draft.chatId);
   }
 
-  return addPeerToSet(accountAssistantBlock, target);
+  return targets.map((target) => addPeerToSet(accountAssistantBlock, target)).some(Boolean);
 }
 
 async function editOwnerNotice(draft, text) {
-  if (
-    !controlBot ||
-    !draft.noticeMessageId ||
-    !CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID
-  ) {
+  if (!auth.valid(draft.authLease)) return;
+  if (!controlBot || !draft.noticeMessageId || !CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID) {
     return;
   }
 
-  await controlBot
-    .editMessageText(trimText(text, TELEGRAM_MESSAGE_LIMIT), {
-      chat_id: CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID,
-      message_id: draft.noticeMessageId,
-    })
-    .catch(() => {});
+  await controlBot.editMessageText(trimText(text, TELEGRAM_MESSAGE_LIMIT), {
+    chat_id: CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID,
+    message_id: draft.noticeMessageId
+  }).catch(() => {});
 }
 
 async function notifyOwner(chatId, text) {
-  if (!controlBot || !chatId) {
+  try { checkContext(); } catch { return; }
+  if (!controlBot || !chatId || !auth.authenticated(chatId)) {
     return;
   }
 
-  await controlBot
-    .sendMessage(chatId, trimText(text, TELEGRAM_MESSAGE_LIMIT))
-    .catch(() => {});
+  await controlBot.sendMessage(chatId, trimText(text, TELEGRAM_MESSAGE_LIMIT)).catch(() => {});
 }
 
 function storePendingDraft(draft) {
   pendingDrafts.set(draft.id, draft);
-  persistDrafts();
   setTimeout(() => {
     pendingDrafts.delete(draft.id);
-    persistDrafts();
   }, CONFIG.ACCOUNT_ASSISTANT_DRAFT_TTL_MS).unref?.();
 }
 
 async function notifyOwnerAboutDraft(draft, title) {
+  if (!auth.valid(draft.authLease)) return;
   if (!controlBot || !CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID) {
-    logger.warn(
-      "Account assistant draft skipped: owner chat id is not configured.",
-    );
+    logger.warn("Account assistant draft skipped: owner chat id is not configured.");
     return;
   }
 
@@ -467,120 +434,208 @@ async function notifyOwnerAboutDraft(draft, title) {
   const notice = await controlBot.sendMessage(
     CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID,
     buildDraftNotice(draft, title),
-    buildDraftKeyboard(draft.id),
+    buildDraftKeyboard(draft.id)
   );
 
   draft.noticeMessageId = notice.message_id;
-  persistDrafts();
 }
 
 async function sendAccountText(draft, text) {
-  if (!accountClient?.isConnected)
-    fail(
-      "Аккаунт не подключён. Используй /account_enable и проверь TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_STRING_SESSION.",
-    );
+  if (!auth.valid(draft.authLease)) throw new Error("AUTH_REQUIRED");
   const message = trimText(text, CONFIG.ACCOUNT_ASSISTANT_MAX_TEXT_CHARS);
 
   if (!message) {
     throw new Error("Cannot send an empty account reply");
   }
 
-  const inputChat =
-    draft.inputChat ||
-    (await accountClient.getInputEntity(resolvePeer(draft.chatId)));
   try {
-    return await accountClient.sendMessage(inputChat, {
+    return await accountClient.sendMessage(draft.inputChat, {
       message,
       replyTo: draft.replyToMessageId,
-      linkPreview: false,
+      linkPreview: false
     });
   } catch (error) {
-    if (
-      !draft.replyToMessageId ||
-      !/REPLY_TO|MSG_ID_INVALID/.test(error.errorMessage || "")
-    ) {
+    if (!draft.replyToMessageId || !auth.valid(draft.authLease)) {
       throw error;
     }
 
-    return accountClient.sendMessage(inputChat, {
+    return accountClient.sendMessage(draft.inputChat, {
       message,
-      linkPreview: false,
+      linkPreview: false
     });
   }
 }
 
-async function sendPendingDraft(id, overrideText) {
+function createBusyError() {
+  return Object.assign(new Error("Draft is already being sent"), { code: "DRAFT_BUSY" });
+}
+
+// Only one caller at a time may send a draft: a double tap must not message the contact twice.
+function getActiveDraft(id) {
+  const draft = pendingDrafts.get(id);
+  if (draft && !auth.valid(draft.authLease)) { pendingDrafts.delete(id); return null; }
+  return draft;
+}
+
+function claimDraft(id) {
   const draft = pendingDrafts.get(id);
 
-  if (
-    !draft ||
-    Date.parse(draft.createdAt) + CONFIG.ACCOUNT_ASSISTANT_DRAFT_TTL_MS <=
-      Date.now()
-  ) {
-    fail("Черновик не найден или истёк.");
+  if (draft && !auth.valid(draft.authLease)) {
+    pendingDrafts.delete(id);
+    throw new Error("Draft not found or expired");
   }
-  if (draft.deliveryUncertain)
-    fail(
-      "Отправка была прервана перезапуском. Проверь целевой чат; повторная отправка этого черновика заблокирована.",
-    );
-  if (
-    (overrideText || draft.reply).length >
-    CONFIG.ACCOUNT_ASSISTANT_MAX_TEXT_CHARS
-  )
-    fail(
-      `Ответ превышает лимит ${CONFIG.ACCOUNT_ASSISTANT_MAX_TEXT_CHARS} символов.`,
-    );
 
-  if (draft.sending || draft.redrafting) {
-    fail("Черновик уже обрабатывается.");
+  if (!draft) {
+    throw new Error("Draft not found or expired");
+  }
+
+  if (draft.sending) {
+    throw createBusyError();
   }
 
   draft.sending = true;
-  persistDrafts();
+  return draft;
+}
+
+async function sendPendingDraft(id, overrideText) {
+  const draft = claimDraft(id);
 
   try {
     await sendAccountText(draft, overrideText || draft.reply);
-    pendingDrafts.delete(id);
-    persistDrafts();
-    try {
-      rememberTurn(
-        `account:${draft.chatId}`,
-        draft.incomingText,
-        overrideText || draft.reply,
-        draft.id,
-      );
-    } catch (error) {
-      logger.error("Account history persistence:", error.code || error.name);
-    }
-    await editOwnerNotice(
-      draft,
-      `Отправлено в аккаунт.\n\nID: ${draft.id}\nКому: ${draft.senderName}`,
-    );
   } catch (error) {
     draft.sending = false;
-    persistDrafts();
     throw error;
+  }
+
+  pendingDrafts.delete(id);
+  await editOwnerNotice(draft, `Отправлено в аккаунт.\n\nID: ${draft.id}\nКому: ${draft.senderName}`);
+}
+
+function getRemainingThrottleMs(chatId) {
+  const lastHandled = lastHandledAt.get(String(chatId)) || 0;
+  return Math.max(0, CONFIG.ACCOUNT_ASSISTANT_MIN_INTERVAL_MS - (Date.now() - lastHandled));
+}
+
+function markHandled(chatId) {
+  const key = String(chatId);
+
+  lastHandledAt.delete(key);
+  lastHandledAt.set(key, Date.now());
+
+  if (lastHandledAt.size > MAX_TRACKED_CHATS) {
+    lastHandledAt.delete(lastHandledAt.keys().next().value);
   }
 }
 
-function shouldThrottleChat(chatId) {
-  const lastHandled = lastHandledAt.get(String(chatId)) || 0;
-  return Date.now() - lastHandled < CONFIG.ACCOUNT_ASSISTANT_MIN_INTERVAL_MS;
+// Messages that arrive too soon after the previous one are not dropped: they are collected
+// and handled together as one draft once the interval has passed.
+function addToBurst(entry, waitMs) {
+  const key = String(entry.chatId);
+  let burst = pendingBursts.get(key);
+
+  if (!burst) {
+    burst = { items: [], timer: null };
+    burst.timer = setTimeout(() => flushBurst(key), Math.max(waitMs, 0));
+    burst.timer.unref?.();
+    pendingBursts.set(key, burst);
+  }
+
+  burst.items.push(entry);
+
+  if (burst.items.length > MAX_BURST_ITEMS) {
+    burst.items.shift();
+  }
+}
+
+function flushBurst(key) {
+  const burst = pendingBursts.get(key);
+
+  pendingBursts.delete(key);
+
+  if (burst) burst.items = burst.items.filter((entry) => auth.valid(entry.authLease));
+
+  if (!burst?.items.length) {
+    return;
+  }
+
+  const last = burst.items[burst.items.length - 1];
+  const combinedText = trimText(burst.items.map((item) => item.incomingText).join("\n"), MAX_INCOMING_TEXT_CHARS);
+
+  dispatchEntry({ ...last, incomingText: combinedText })
+    .catch((error) => logger.error("Account assistant task failed:", error));
+}
+
+function dispatchEntry(entry) {
+  markHandled(entry.chatId);
+  return enqueueChatTask(entry.chatId, () => runWithLease(entry.authLease, () => processEntry(entry)));
+}
+
+async function processEntry({ message, incomingText, profile, chatId, authLease }) {
+  if (!auth.valid(authLease) || !accountAssistantEnabled) return;
+  if (CONFIG.ACCOUNT_ASSISTANT_REPLY_DELAY_MS > 0) {
+    await delay(CONFIG.ACCOUNT_ASSISTANT_REPLY_DELAY_MS);
+  }
+
+  const inputChat = await message.getInputChat();
+  if (!auth.valid(authLease) || !accountAssistantEnabled) return;
+
+  if (!inputChat) {
+    logger.warn(`Account assistant skipped ${chatId}: could not resolve input chat.`);
+    return;
+  }
+
+  let draft;
+
+  try {
+    draft = await draftAccountReply(`account:${chatId}`, incomingText, profile);
+    if (!auth.valid(authLease) || !accountAssistantEnabled) return;
+  } catch (error) {
+    logger.error(`Account assistant could not draft a reply for ${chatId}:`, error);
+    await notifyOwner(
+      CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID,
+      `Не удалось подготовить черновик для ${profile.name}${profile.username ? ` (@${profile.username})` : ""}: сбой AI-запроса, подробности в логе.`
+    );
+    return;
+  }
+
+  const pendingDraft = {
+    authLease,
+    id: createDraftId(),
+    chatId,
+    senderId: profile.id,
+    inputChat,
+    replyTo: message.id,
+    replyToMessageId: message.id,
+    incomingText,
+    reply: draft.reply,
+    sendable: draft.sendable,
+    reason: draft.reason,
+    senderName: profile.name,
+    username: profile.username,
+    createdAt: new Date().toISOString()
+  };
+
+  const mode = getEffectiveMode();
+  const autoRisk = mode === "auto" && draft.sendable ? findAutoSendRisk(draft.reply) : null;
+
+  if (mode === "auto" && draft.sendable && !autoRisk) {
+    await sendAccountText(pendingDraft, draft.reply);
+    logger.info(`Account assistant auto-replied to ${chatId}`);
+    await notifyOwner(
+      CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID,
+      `Авто-ответ отправлен: ${profile.name}${profile.username ? ` (@${profile.username})` : ""}\n\nСообщение: ${trimText(incomingText, 300)}\nОтвет: ${trimText(draft.reply, 300)}`
+    );
+  } else if (mode === "dry-run") {
+    await notifyOwnerAboutDraft(pendingDraft, "DRY-RUN: черновик без отправки");
+  } else {
+    pendingDraft.autoBlockedReason = autoRisk || "";
+    await notifyOwnerAboutDraft(pendingDraft);
+  }
 }
 
 async function processIncomingAccountMessage(event) {
-  const access = require("./access").getAccessGate();
-  if (
-    access.enabled &&
-    !access.authorized(
-      {
-        chat: { id: CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID, type: "private" },
-        from: { id: CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID },
-      },
-      false,
-    )
-  )
-    return;
+  const authLease = auth.capture(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID);
+  if (!auth.valid(authLease)) return;
   if (!accountAssistantEnabled || !started || !accountClient) {
     return;
   }
@@ -597,10 +652,7 @@ async function processIncomingAccountMessage(event) {
     return;
   }
 
-  const incomingText = trimText(
-    message.text || message.message || message.rawText || "",
-    3000,
-  );
+  const incomingText = trimText(message.text || message.message || message.rawText || "", MAX_INCOMING_TEXT_CHARS);
 
   if (!incomingText) {
     return;
@@ -610,485 +662,490 @@ async function processIncomingAccountMessage(event) {
   const profile = buildSenderProfile(sender, message);
   const chatId = profile.chatId || profile.id;
 
-  if (
-    !chatId ||
-    !shouldHandlePeer(profile) ||
-    !claimAccountMessage(chatId, message.id)
-  ) {
+  // A message without an id cannot be deduplicated, so it is let through rather than mistaken for a repeat.
+  const isRepeat = message.id ? !processedMessages.claim(`${chatId}:${message.id}`) : false;
+
+  if (!chatId || !shouldHandlePeer(profile) || isRepeat) {
     return;
   }
 
-  await enqueueChatTask(chatId, async () => {
-    if (shouldThrottleChat(chatId)) {
-      const wait =
-        CONFIG.ACCOUNT_ASSISTANT_MIN_INTERVAL_MS -
-        (Date.now() - (lastHandledAt.get(String(chatId)) || 0));
-      await delay(Math.max(0, wait));
-    }
+  const entry = { message, incomingText, profile, chatId, authLease };
+  const waitMs = getRemainingThrottleMs(chatId);
 
-    if (
-      !accountAssistantEnabled ||
-      !accountClient ||
-      !shouldHandlePeer(profile)
-    )
-      return;
+  if (waitMs > 0 || pendingBursts.has(String(chatId))) {
+    addToBurst(entry, waitMs);
+    return;
+  }
 
-    if (CONFIG.ACCOUNT_ASSISTANT_REPLY_DELAY_MS > 0) {
-      await delay(CONFIG.ACCOUNT_ASSISTANT_REPLY_DELAY_MS);
-    }
+  // Not awaited: a slow AI request for one contact must not hold up the Telegram update loop.
+  dispatchEntry(entry).catch((error) => logger.error("Account assistant task failed:", error));
+}
 
-    const inputChat = await message.getInputChat();
+async function answerCallback(query, text, showAlert = false) {
+  await controlBot.answerCallbackQuery(query.id, { text, show_alert: showAlert }).catch(() => {});
+}
 
-    if (!inputChat) {
-      logger.warn(
-        `Account assistant skipped ${chatId}: could not resolve input chat.`,
-      );
-      return;
-    }
-
-    const draft = await draftAccountReply(
-      `account:${chatId}`,
-      incomingText,
-      profile,
-    );
-    const pendingDraft = {
-      id: createDraftId(),
-      chatId,
-      inputChat,
-      replyTo: message.id,
-      replyToMessageId: message.id,
-      incomingText,
-      reply: draft.reply,
-      sendable: draft.sendable,
-      reason: draft.reason,
-      senderName: profile.name,
-      username: profile.username,
-      createdAt: new Date().toISOString(),
-    };
-
-    const mode = getAccountAssistantMode();
-
-    if (mode === "auto" && draft.sendable) {
-      await sendAccountText(pendingDraft, draft.reply);
-      rememberTurn(
-        `account:${chatId}`,
-        incomingText,
-        draft.reply,
-        pendingDraft.id,
-      );
-      logger.info(`Account assistant auto-replied to ${chatId}`);
-    } else if (mode === "dry-run") {
-      await notifyOwnerAboutDraft(
-        pendingDraft,
-        "DRY-RUN: черновик без отправки",
-      );
-    } else {
-      await notifyOwnerAboutDraft(pendingDraft);
-    }
-
-    lastHandledAt.set(String(chatId), Date.now());
-  });
+function describeSender(draft) {
+  return `${draft.senderName}${draft.username ? ` (@${draft.username})` : ""}`;
 }
 
 async function handleAccountCallback(query) {
+  return runWithLease(auth.capture(query.from?.id), () => handleAuthenticatedAccountCallback(query));
+}
+
+async function handleAuthenticatedAccountCallback(query) {
   const data = query.data || "";
 
   if (!data.startsWith("account:")) {
     return;
   }
-  if (!(await require("./access").guardCallback(controlBot, query))) return;
 
-  if (!isOwnerMessage({ chat: query.message?.chat, from: query.from })) {
-    await controlBot
-      .answerCallbackQuery(query.id, {
-        text: "Эта кнопка доступна только владельцу.",
-        show_alert: false,
-      })
-      .catch(() => {});
+  if (!isOwnerActor(query.message?.chat?.id, query.from?.id)) {
+    await answerCallback(query, "Эта кнопка доступна только владельцу.");
     return;
   }
+  if (!await admitCallback(controlBot, query)) return;
 
   const [, action, id] = data.split(":");
-  const draft = pendingDrafts.get(id);
+  const draft = getActiveDraft(id);
 
   try {
     if (!draft) {
-      await controlBot.answerCallbackQuery(query.id, {
-        text: "Черновик уже отправлен, отклонен или истек.",
-        show_alert: false,
-      });
+      await answerCallback(query, "Черновик уже отправлен, отклонен или истек.");
       return;
     }
-    if (draft.sending || draft.redrafting) {
-      await controlBot
-        .answerCallbackQuery(query.id, { text: "Черновик уже обрабатывается." })
-        .catch(() => {});
+
+    if (draft.sending) {
+      await answerCallback(query, "Черновик уже отправляется.");
       return;
     }
 
     if (action === "send") {
       await sendPendingDraft(id);
-      await controlBot.answerCallbackQuery(query.id, {
-        text: "Отправлено.",
-        show_alert: false,
-      });
-      await notifyOwner(
-        CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID,
-        [
-          `Сообщение отправлено: ${draft.senderName}${draft.username ? ` (@${draft.username})` : ""}`,
-          `ID: ${draft.id}`,
-          `Chat ID: ${draft.chatId}`,
-        ].join("\n"),
-      );
+      await answerCallback(query, "Отправлено.");
+      await notifyOwner(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID, [
+        `Сообщение отправлено: ${describeSender(draft)}`,
+        `ID: ${draft.id}`,
+        `Chat ID: ${draft.chatId}`
+      ].join("\n"));
       return;
     }
 
     if (action === "redraft") {
       const updatedDraft = await redraftPendingDraft(id);
-      await controlBot.answerCallbackQuery(query.id, {
-        text: "Черновик обновлён.",
-        show_alert: false,
-      });
-      await notifyOwner(
-        CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID,
-        [
-          `Редрафт завершён для ${updatedDraft.senderName}${updatedDraft.username ? ` (@${updatedDraft.username})` : ""}`,
-          `ID: ${updatedDraft.id}`,
-          `Sendable: ${updatedDraft.sendable}`,
-          `Причина: ${updatedDraft.reason}`,
-        ].join("\n"),
-      );
+      await answerCallback(query, "Черновик обновлён.");
+      await notifyOwner(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID, [
+        `Редрафт завершён для ${describeSender(updatedDraft)}`,
+        `ID: ${updatedDraft.id}`,
+        `Sendable: ${updatedDraft.sendable}`,
+        `Причина: ${updatedDraft.reason}`
+      ].join("\n"));
       return;
     }
 
     if (action === "drop") {
       pendingDrafts.delete(id);
-      persistDrafts();
-      await editOwnerNotice(
-        draft,
-        `Отклонено.\n\nID: ${draft.id}\nОт: ${draft.senderName}`,
-      );
-      await controlBot.answerCallbackQuery(query.id, {
-        text: "Отклонено.",
-        show_alert: false,
-      });
-      await notifyOwner(
-        CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID,
-        [
-          `Черновик отклонён: ${draft.senderName}${draft.username ? ` (@${draft.username})` : ""}`,
-          `ID: ${draft.id}`,
-          `Chat ID: ${draft.chatId}`,
-        ].join("\n"),
-      );
+      await editOwnerNotice(draft, `Отклонено.\n\nID: ${draft.id}\nОт: ${draft.senderName}`);
+      await answerCallback(query, "Отклонено.");
+      await notifyOwner(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID, [
+        `Черновик отклонён: ${describeSender(draft)}`,
+        `ID: ${draft.id}`,
+        `Chat ID: ${draft.chatId}`
+      ].join("\n"));
       return;
     }
 
     if (action === "block") {
       const blocked = blockDraftSender(draft);
       pendingDrafts.delete(id);
-      persistDrafts();
-      await editOwnerNotice(
-        draft,
-        `Заблокирован отправитель.\n\nID: ${draft.id}\nОт: ${draft.senderName}`,
-      );
-      await controlBot.answerCallbackQuery(query.id, {
-        text: blocked
-          ? "Отправитель заблокирован."
-          : "Не удалось заблокировать.",
-        show_alert: false,
-      });
-      await notifyOwner(
-        CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID,
-        [
-          `Отправитель заблокирован: ${draft.senderName}${draft.username ? ` (@${draft.username})` : ""}`,
-          `ID: ${draft.id}`,
-          `Chat ID: ${draft.chatId}`,
-        ].join("\n"),
-      );
+      await editOwnerNotice(draft, `Заблокирован отправитель.\n\nID: ${draft.id}\nОт: ${draft.senderName}`);
+      await answerCallback(query, blocked ? "Отправитель заблокирован." : "Не удалось заблокировать.");
+      await notifyOwner(CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID, [
+        `Отправитель заблокирован: ${describeSender(draft)}`,
+        `ID: ${draft.id}`,
+        `Chat ID: ${draft.chatId}`
+      ].join("\n"));
       return;
     }
   } catch (error) {
-    logger.error("Account assistant callback error:", error.message);
-    await controlBot
-      .answerCallbackQuery(query.id, {
-        text: `Ошибка: ${error.message}`,
-        show_alert: true,
-      })
-      .catch(() => {});
+    if (error.code === "DRAFT_BUSY") {
+      await answerCallback(query, "Черновик уже отправляется.");
+      return;
+    }
+
+    logger.error("Account assistant callback error:", error);
+    await answerCallback(query, `Ошибка: ${error.message}`, true);
   }
 }
 
 async function sendStatus(chatId) {
   const status = getAccountAssistantStatus();
-  await controlBot.sendMessage(
-    chatId,
-    [
-      "Account assistant:",
-      `enabled: ${status.enabled}`,
-      `started: ${status.started}`,
-      `connected: ${status.connected}`,
-      `mode: ${status.mode}`,
-      `privateOnly: ${status.privateOnly}`,
-      `pendingDrafts: ${status.pendingDrafts}`,
-      `allowList: ${status.allowList}`,
-      `blockList: ${status.blockList}`,
-      `ownerChatIdConfigured: ${status.ownerChatIdConfigured}`,
-    ].join("\n"),
-  );
+  await controlBot.sendMessage(chatId, [
+    "Account assistant:",
+    `enabled: ${status.enabled}`,
+    `started: ${status.started}`,
+    `connected: ${status.connected}`,
+    `mode: ${describeModes()}`,
+    `privateOnly: ${status.privateOnly}`,
+    `pendingDrafts: ${status.pendingDrafts}`,
+    `allowList: ${accountAssistantAllow.size ? formatPeerSet(accountAssistantAllow) : "all"}`,
+    `blockList: ${accountAssistantBlock.size ? formatPeerSet(accountAssistantBlock) : "none"}`,
+    `ownerChatIdConfigured: ${status.ownerChatIdConfigured}`
+  ].join("\n"));
 }
 
 async function sendPendingList(chatId) {
+  for (const [key, draft] of pendingDrafts) if (!auth.valid(draft.authLease)) pendingDrafts.delete(key);
   if (!pendingDrafts.size) {
     await controlBot.sendMessage(chatId, "Активных черновиков нет.");
     return;
   }
 
   const lines = Array.from(pendingDrafts.values()).map((draft) => {
-    return `${draft.id}: ${draft.senderName}${draft.username ? ` (@${draft.username})` : ""}${draft.deliveryUncertain ? " — проверь доставку, повтор заблокирован" : ""}`;
+    return `${draft.id}: ${describeSender(draft)}`;
   });
 
-  await controlBot.sendMessage(
-    chatId,
-    trimText(["Черновики:", ...lines].join("\n")),
-  );
+  await controlBot.sendMessage(chatId, trimText(["Черновики:", ...lines].join("\n")));
 }
 
 async function redraftPendingDraft(id) {
-  const draft = pendingDrafts.get(id);
+  const draft = getActiveDraft(id);
 
   if (!draft) {
-    fail("Черновик не найден или истёк.");
+    throw new Error("Draft not found or expired");
   }
-  if (draft.sending || draft.redrafting) fail("Черновик уже обрабатывается.");
-  draft.redrafting = true;
-  try {
-    const senderProfile = {
-      name: draft.senderName,
-      username: draft.username,
-      id: draft.chatId,
-    };
 
-    const newDraft = await draftAccountReply(
-      `account:${draft.chatId}`,
-      draft.incomingText,
-      senderProfile,
-    );
-
-    draft.reply = newDraft.reply;
-    draft.sendable = newDraft.sendable;
-    draft.reason = newDraft.reason;
-    draft.updatedAt = new Date().toISOString();
-
-    await controlBot
-      .editMessageText(buildDraftNotice(draft, "Черновик обновлён"), {
-        chat_id: CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID,
-        message_id: draft.noticeMessageId,
-        ...buildDraftKeyboard(draft.id),
-      })
-      .catch(() => {});
-
-    return draft;
-  } finally {
-    draft.redrafting = false;
-    persistDrafts();
+  if (draft.sending) {
+    throw createBusyError();
   }
+
+  const senderProfile = {
+    name: draft.senderName,
+    username: draft.username,
+    id: draft.senderId || draft.chatId
+  };
+
+  const newDraft = await draftAccountReply(`account:${draft.chatId}`, draft.incomingText, senderProfile);
+
+  draft.reply = newDraft.reply;
+  draft.sendable = newDraft.sendable;
+  draft.reason = newDraft.reason;
+  draft.updatedAt = new Date().toISOString();
+
+  await editOwnerNotice(
+    draft,
+    `Redraft выполнен.\n\nID: ${draft.id}\nОт: ${draft.senderName}\nSendable: ${draft.sendable}`
+  );
+
+  return draft;
 }
 
-async function connectAccountAssistant() {
+async function openConnection() {
   const missing = getMissingConfig();
 
   if (missing.length) {
-    fail(`Не хватает настроек аккаунта: ${missing.join(", ")}.`);
+    throw new Error(`Missing env: ${missing.join(", ")}`);
   }
 
-  if (accountClient && accountClient.isConnected) {
+  if (accountClient?.connected) {
     return accountClient;
   }
 
-  accountClient = new TelegramClient(
-    new StringSession(CONFIG.TELEGRAM_STRING_SESSION),
-    CONFIG.TELEGRAM_API_ID,
-    CONFIG.TELEGRAM_API_HASH,
-    { connectionRetries: 5 },
-  );
+  const client = clientFactory();
 
-  try {
-    await accountClient.connect();
-    if (!(await accountClient.checkAuthorization()))
-      fail(
-        "Сессия Telegram-аккаунта не авторизована. Создай новую через npm run telegram:session и обнови TELEGRAM_STRING_SESSION.",
-      );
-  } catch (error) {
-    await accountClient.disconnect().catch(() => {});
-    accountClient = null;
-    started = false;
+  await client.connect();
+
+  if (!(await client.checkAuthorization())) {
+    await client.disconnect().catch(() => {});
+    throw new Error("Account assistant session is not authorized. Run npm run telegram:session.");
+  }
+
+  client.addEventHandler(safeHandler("Account message handler", processIncomingAccountMessage), eventFilterFactory());
+  accountClient = client;
+  started = true;
+  logger.info(`Account assistant connected in ${describeModes()} mode.`);
+  return client;
+}
+
+// Two quick /account_enable taps must not open two connections with one session.
+function connectAccountAssistant() {
+  if (!connecting) {
+    connecting = openConnection().finally(() => {
+      connecting = null;
+    });
+  }
+
+  return connecting;
+}
+
+async function disconnectClient() {
+  const client = accountClient;
+
+  accountClient = null;
+  started = false;
+
+  if (client) {
+    await client.disconnect().catch(() => {});
+  }
+}
+
+// The latest /account_enable or /account_disable wins. Opening the connection can take long, and a disable that
+// arrives meanwhile finds no client to close: whoever finishes connecting afterwards must notice that and clean up.
+async function enableAccountAssistant(chatId) {
+  const generation = ++lifecycleGeneration;
+
+  desiredEnabled = true;
+
+  if (!accountClient) {
+    await connectAccountAssistant();
+  }
+  try { checkContext(); }
+  catch (error) {
+    desiredEnabled = false;
+    accountAssistantEnabled = false;
+    await disconnectClient();
     throw error;
   }
 
-  accountClient.addEventHandler(
-    (event) => {
-      processIncomingAccountMessage(event).catch((error) => {
-        logger.error("Account assistant message handler error:", error.message);
-      });
-    },
-    new NewMessage({ incoming: true }),
-  );
-  started = true;
-  logger.info(
-    `Account assistant connected in ${getAccountAssistantMode()} mode.`,
-  );
-  return accountClient;
-}
+  if (generation !== lifecycleGeneration) {
+    if (!desiredEnabled) {
+      await disconnectClient();
+    }
 
-async function enableAccountAssistant(chatId) {
-  if (!accountClient?.isConnected) await connectAccountAssistant();
+    return;
+  }
+
   accountAssistantEnabled = true;
-  persistSettings();
-
-  await controlBot.sendMessage(
-    chatId,
-    "Account assistant включён и готов к работе.",
-  );
+  warnIfAutoDowngraded();
+  await controlBot.sendMessage(chatId, "Account assistant включён и готов к работе.");
 }
 
 async function disableAccountAssistant(chatId) {
+  lifecycleGeneration += 1;
+  desiredEnabled = false;
   accountAssistantEnabled = false;
-  persistSettings();
-
-  if (accountClient) {
-    await accountClient.disconnect().catch(() => {});
-    accountClient = null;
-    started = false;
-  }
+  await disconnectClient();
 
   await controlBot.sendMessage(chatId, "Account assistant отключён.");
 }
 
-function registerControlBotHandlers(bot) {
-  if (!bot || handlersRegistered) return;
-  handlersRegistered = true;
-  controlBot = bot;
-  bot.on("callback_query", (query) =>
-    handleAccountCallback(query).catch((error) =>
-      console.error("Account callback:", error.code || error.name),
-    ),
-  );
+// Lets drafts that are being prepared finish (bounded), so their notices are not lost.
+async function waitForAccountTasks(timeoutMs = TASKS_GRACE_MS) {
+  await Promise.race([
+    enqueueChatTask.whenIdle(),
+    new Promise((resolve) => setTimeout(resolve, timeoutMs).unref?.())
+  ]);
 }
 
-async function executeAccountCommand(msg, command, args) {
-  if (!require("./access").getAccessGate().authorized(msg))
-    fail("🔒 Доступ истёк. Войди через /start с паролем.");
-  if (!isOwnerMessage(msg))
-    fail("Эта команда доступна только владельцу в личном чате.");
-  const chatId = msg.chat.id;
-  const name = command.replace(/^account_/, "");
-  if (
-    ["help", "status", "config", "pending", "enable", "disable"].includes(
-      name,
-    ) &&
-    args
-  )
-    fail("Эта команда не принимает аргументы.");
-  if (name === "help") {
-    await controlBot.sendMessage(chatId, buildAccountAssistantHelpText());
-    return;
+// Called on shutdown: releases the Telegram connection and timers. Messages that were held back by the
+// throttle are already consumed from Telegram, so they get their draft now instead of being lost.
+async function stopAccountAssistant() {
+  for (const [key, burst] of Array.from(pendingBursts.entries())) {
+    clearTimeout(burst.timer);
+    flushBurst(key);
   }
-  if (name === "status") return sendStatus(chatId);
-  if (name === "config") {
-    await controlBot.sendMessage(chatId, buildAccountAssistantConfigText());
-    return;
-  }
-  if (name === "pending") return sendPendingList(chatId);
-  if (name === "enable") return enableAccountAssistant(chatId);
-  if (name === "disable") return disableAccountAssistant(chatId);
-  if (name === "mode") {
-    if (args && !setAccountAssistantMode(args))
-      fail("Допустимые режимы: approval, auto, dry-run.");
-    await controlBot.sendMessage(chatId, "Режим: " + getAccountAssistantMode());
-    return;
-  }
-  if (name === "private") {
-    if (args && !/^(true|false)$/i.test(args))
-      fail("Используй true или false.");
-    if (args) {
-      accountAssistantPrivateOnly = args.toLowerCase() === "true";
-      persistSettings();
-    }
-    await controlBot.sendMessage(
-      chatId,
-      "Только личные чаты: " + accountAssistantPrivateOnly,
-    );
-    return;
-  }
-  if (["allow", "unallow", "block", "unblock"].includes(name)) {
-    if (!/^(@?[a-zA-Z][a-zA-Z0-9_]{4,31}|-?\d+)$/.test(args))
-      fail("Укажи Telegram chatId или @username.");
-    const set = name.includes("allow")
-      ? accountAssistantAllow
-      : accountAssistantBlock;
-    const changed = name.startsWith("un")
-      ? removePeerFromSet(set, args)
-      : addPeerToSet(set, args);
-    await controlBot.sendMessage(
-      chatId,
-      changed ? "Список обновлён." : "Элемент не найден.",
-    );
-    return;
-  }
-  if (name === "message") {
-    const m = args.match(/^(@?[a-zA-Z][a-zA-Z0-9_]{4,31}|-?\d+)\s+([\s\S]+)$/);
-    if (!m) fail("Используй /account_message @username текст.");
-    await sendDirectAccountMessage(m[1], m[2]);
-    await controlBot.sendMessage(chatId, "Сообщение отправлено.");
-    return;
-  }
-  const m = args.match(/^([a-z0-9]+)(?:\s+([\s\S]+))?$/i);
-  if (!m || (name === "reply" ? !m[2] : !!m[2]))
-    fail("Укажи ID черновика" + (name === "reply" ? " и текст ответа." : "."));
-  const draft = pendingDrafts.get(m[1]);
-  if (
-    !draft ||
-    Date.parse(draft.createdAt) + CONFIG.ACCOUNT_ASSISTANT_DRAFT_TTL_MS <=
-      Date.now()
-  )
-    fail("Черновик не найден или истёк.");
-  if (name === "send" || name === "reply") {
-    await sendPendingDraft(m[1], m[2]);
-    await controlBot.sendMessage(chatId, "Отправлено.");
-    return;
-  }
-  if (name === "redraft") {
-    await redraftPendingDraft(m[1]);
-    await controlBot.sendMessage(chatId, "Черновик обновлён.");
-    return;
-  }
-  if (name === "drop") {
-    if (draft.sending || draft.redrafting) fail("Черновик уже обрабатывается.");
-    pendingDrafts.delete(m[1]);
-    persistDrafts();
-    await editOwnerNotice(draft, "Черновик отклонён.");
-    await controlBot.sendMessage(chatId, "Отклонено.");
-    return;
-  }
-  fail("Неизвестная команда аккаунта.");
+
+  await waitForAccountTasks();
+  await disconnectClient();
 }
-async function startAccountAssistant(bot) {
+
+function registerControlBotHandlers(bot) {
+  if (!bot || handlersRegistered) {
+    return;
+  }
+
+  handlersRegistered = true;
+  controlBot = bot;
+
+  bot.on("callback_query", safeHandler("Account callback", handleAccountCallback));
+
+  function ownerCommand(regexp, handler) {
+    bot.onText(regexp, safeHandler(`Account command ${regexp.source.slice(0, 24)}`, async (msg, match) => {
+      if (msg.from?.is_bot || !isAddressedToThisBot(msg.text) || !isOwnerActor(msg.chat.id, msg.from?.id)) {
+        return;
+      }
+      if (!await admitMessage(bot, msg)) return;
+
+      await withMessageAuth(msg, () => handler(msg, match));
+    }));
+  }
+
+  ownerCommand(/^\/account_help(?:@\w+)?(?:\s|$)/, async (msg) => {
+    await controlBot.sendMessage(msg.chat.id, buildAccountAssistantHelpText());
+  });
+
+  ownerCommand(/^\/account_status(?:@\w+)?(?:\s|$)/, async (msg) => {
+    await sendStatus(msg.chat.id);
+  });
+
+  ownerCommand(/^\/account_config(?:@\w+)?(?:\s|$)/, async (msg) => {
+    await controlBot.sendMessage(msg.chat.id, buildAccountAssistantConfigText());
+  });
+
+  ownerCommand(/^\/account_pending(?:@\w+)?(?:\s|$)/, async (msg) => {
+    await sendPendingList(msg.chat.id);
+  });
+
+  ownerCommand(/^\/account_enable(?:@\w+)?(?:\s|$)/, async (msg) => {
+    try {
+      await enableAccountAssistant(msg.chat.id);
+    } catch (error) {
+      await controlBot.sendMessage(msg.chat.id, `Не удалось включить: ${error.message}`);
+    }
+  });
+
+  ownerCommand(/^\/account_disable(?:@\w+)?(?:\s|$)/, async (msg) => {
+    await disableAccountAssistant(msg.chat.id);
+  });
+
+  ownerCommand(/^\/account_mode(?:@\w+)?(?:\s+([a-z-]+))?\s*$/i, async (msg, match) => {
+    const requestedMode = match[1];
+
+    if (!requestedMode) {
+      await controlBot.sendMessage(msg.chat.id, `Текущий режим: ${describeModes()}`);
+      return;
+    }
+
+    if (!setAccountAssistantMode(requestedMode)) {
+      await controlBot.sendMessage(msg.chat.id, "Режим не изменён. Допустимые: approval, auto, dry-run.");
+      return;
+    }
+
+    warnIfAutoDowngraded();
+    await controlBot.sendMessage(msg.chat.id, `Режим изменён на ${describeModes()}. Действует до перезапуска.`);
+  });
+
+  ownerCommand(/^\/account_private(?:@\w+)?(?:\s+(\S+))?\s*$/i, async (msg, match) => {
+    const requested = match[1];
+
+    if (!requested) {
+      await controlBot.sendMessage(msg.chat.id, `privateOnly: ${accountAssistantPrivateOnly}`);
+      return;
+    }
+
+    const value = parseBoolean(requested);
+
+    if (value === null) {
+      await controlBot.sendMessage(msg.chat.id, `Не понял «${trimText(requested, 30)}». Используй: /account_private true или /account_private false. Значение не изменено.`);
+      return;
+    }
+
+    accountAssistantPrivateOnly = value;
+    await controlBot.sendMessage(msg.chat.id, `Private-only установлен в ${accountAssistantPrivateOnly}. Действует до перезапуска.`);
+  });
+
+  ownerCommand(/^\/account_allow(?:@\w+)?\s+(@?[\S]+)\s*$/i, async (msg, match) => {
+    if (!addPeerToSet(accountAssistantAllow, match[1])) {
+      await controlBot.sendMessage(msg.chat.id, "Не удалось добавить разрешённый чат.");
+      return;
+    }
+
+    await controlBot.sendMessage(msg.chat.id, `Добавлено в allow-list: ${normalizeToken(match[1])}`);
+  });
+
+  ownerCommand(/^\/account_unallow(?:@\w+)?\s+(@?[\S]+)\s*$/i, async (msg, match) => {
+    if (!removePeerFromSet(accountAssistantAllow, match[1])) {
+      await controlBot.sendMessage(msg.chat.id, "Элемент не найден в allow-list.");
+      return;
+    }
+
+    await controlBot.sendMessage(msg.chat.id, `Удалено из allow-list: ${normalizeToken(match[1])}`);
+  });
+
+  ownerCommand(/^\/account_block(?:@\w+)?\s+(@?[\S]+)\s*$/i, async (msg, match) => {
+    if (!addPeerToSet(accountAssistantBlock, match[1])) {
+      await controlBot.sendMessage(msg.chat.id, "Не удалось добавить блокировку.");
+      return;
+    }
+
+    await controlBot.sendMessage(msg.chat.id, `Добавлено в block-list: ${normalizeToken(match[1])}`);
+  });
+
+  ownerCommand(/^\/account_unblock(?:@\w+)?\s+(@?[\S]+)\s*$/i, async (msg, match) => {
+    if (!removePeerFromSet(accountAssistantBlock, match[1])) {
+      await controlBot.sendMessage(msg.chat.id, "Элемент не найден в block-list.");
+      return;
+    }
+
+    await controlBot.sendMessage(msg.chat.id, `Удалено из block-list: ${normalizeToken(match[1])}`);
+  });
+
+  ownerCommand(/^\/account_message(?:@\w+)?\s+(@?[\S]+)\s+([\s\S]+)$/i, async (msg, match) => {
+    try {
+      await sendDirectAccountMessage(match[1], match[2]);
+      await controlBot.sendMessage(msg.chat.id, `Сообщение отправлено: ${normalizeToken(match[1])}`);
+    } catch (error) {
+      await controlBot.sendMessage(msg.chat.id, `Не отправлено: ${error.message}`);
+    }
+  });
+
+  ownerCommand(/^\/account_redraft(?:@\w+)?\s+([a-z0-9]+)\s*$/i, async (msg, match) => {
+    try {
+      const draft = await redraftPendingDraft(match[1]);
+      await controlBot.sendMessage(msg.chat.id, `Черновик обновлён. Sendable: ${draft.sendable}.`);
+    } catch (error) {
+      await controlBot.sendMessage(msg.chat.id, `Не удалось редрафт: ${error.message}`);
+    }
+  });
+
+  ownerCommand(/^\/account_send(?:@\w+)?\s+([a-z0-9]+)\s*$/i, async (msg, match) => {
+    try {
+      await sendPendingDraft(match[1]);
+      await controlBot.sendMessage(msg.chat.id, "Отправлено.");
+    } catch (error) {
+      await controlBot.sendMessage(msg.chat.id, `Не отправил: ${error.message}`);
+    }
+  });
+
+  ownerCommand(/^\/account_drop(?:@\w+)?\s+([a-z0-9]+)\s*$/i, async (msg, match) => {
+    const id = match[1];
+    const draft = getActiveDraft(id);
+
+    if (draft?.sending) {
+      await controlBot.sendMessage(msg.chat.id, "Черновик уже отправляется.");
+      return;
+    }
+
+    pendingDrafts.delete(id);
+
+    if (draft) {
+      await editOwnerNotice(draft, `Отклонено.\n\nID: ${draft.id}\nОт: ${draft.senderName}`);
+    }
+
+    await controlBot.sendMessage(msg.chat.id, draft ? "Отклонено." : "Черновик не найден.");
+  });
+
+  ownerCommand(/^\/account_reply(?:@\w+)?\s+([a-z0-9]+)\s+([\s\S]+)$/i, async (msg, match) => {
+    try {
+      await sendPendingDraft(match[1], match[2]);
+      await controlBot.sendMessage(msg.chat.id, "Твой текст отправлен.");
+    } catch (error) {
+      await controlBot.sendMessage(msg.chat.id, `Не отправил: ${error.message}`);
+    }
+  });
+}
+
+// `deps` lets tests replace the Telegram client; production passes nothing.
+async function startAccountAssistant(bot, deps = {}) {
+  if (deps.createClient) {
+    clientFactory = deps.createClient;
+  }
+
+  if (deps.createEventFilter) {
+    eventFilterFactory = deps.createEventFilter;
+  }
+
   registerControlBotHandlers(bot);
 
   if (!accountAssistantEnabled) {
-    logger.info(
-      "Account assistant disabled. Set ACCOUNT_ASSISTANT_ENABLED=true to enable it.",
-    );
+    logger.info("Account assistant disabled. Set ACCOUNT_ASSISTANT_ENABLED=true to enable it.");
     return null;
   }
 
-  if (
-    accountAssistantMode === "auto" &&
-    !CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID
-  ) {
-    logger.warn(
-      "Account assistant auto mode has no owner chat id; unsafe drafts will be skipped silently.",
-    );
+  warnIfAutoDowngraded();
+
+  if (getEffectiveMode() === "auto" && !CONFIG.ACCOUNT_ASSISTANT_OWNER_CHAT_ID) {
+    logger.warn("Account assistant auto mode has no owner chat id; unsafe drafts will be skipped silently.");
   }
 
   try {
@@ -1102,13 +1159,9 @@ async function startAccountAssistant(bot) {
 }
 
 module.exports = {
-  stopAccountAssistant: async () => {
-    if (accountClient) await accountClient.disconnect();
-    accountClient = null;
-    started = false;
-  },
   startAccountAssistant,
+  stopAccountAssistant,
+  waitForAccountTasks,
   getAccountAssistantStatus,
-  executeAccountCommand,
-  registerControlBotHandlers,
+  findAutoSendRisk
 };

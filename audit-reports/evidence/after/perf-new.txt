@@ -1,0 +1,3 @@
+{"scenario":"memory 1 chats (0.1 MB) + 30 concurrent messages","totalMsFor30Replies":155,"healthSamples":4,"healthLatencyMs":{"p50":22,"p95":94.4,"max":94.4}}
+{"scenario":"memory 100 chats (11 MB) + 30 concurrent messages","totalMsFor30Replies":226,"healthSamples":4,"healthLatencyMs":{"p50":35.7,"p95":74.3,"max":74.3}}
+{"scenario":"voice 18 MB end to end","totalMs":368,"peakRssMb":230}
