@@ -434,6 +434,9 @@ function createIdeaCommands({ bot, keyboard, rng = systemRng, store = getStore, 
       keyboard.attach(sent.message_id);
       clearKeyboard(bot, chatId, keyboard.previousMessageId);
     },
+    // The pressed spark becomes the chat's last one again inside the chat task, right before the model is asked, like a
+    // spark code: a spark drawn after it (or the history expiring before the 24-hour button) must not be what
+    // "поменяй поворот" changes then.
     dailyButton(query, entry) {
       const technique = techniqueById(entry.data.technique);
 
@@ -441,7 +444,14 @@ function createIdeaCommands({ bot, keyboard, rng = systemRng, store = getStore, 
         return { refuse: "Кнопка устарела" };
       }
 
-      return { run: () => answerWithAi(bot, callbackMessage(query), sparkRequest("", entry.data.spark, technique)) };
+      const msg = callbackMessage(query);
+      const { spark: pressed } = entry.data;
+
+      return { run: () => answerWithAi(bot, msg, () => {
+        if (!messageAuthorized(msg)) return null;
+        history.record(msg.chat.id, [pressed], technique);
+        return sparkRequest("", pressed, technique);
+      }) };
     },
     // A press under a spark card (src/handlers/actions.js). Only the spark that is still the chat's last one can be
     // changed: an older card would redraw something the person is no longer looking at.

@@ -1,6 +1,6 @@
 const CONFIG = require("./config");
 const crypto = require("crypto");
-const { auth, captureMessage, withMessageAuth } = require("./services/auth");
+const { auth, withMessageAuth } = require("./services/auth");
 const logger = require("./utils/logger");
 const { safeHandler } = require("./utils/safe");
 const { getSttModels } = require("./services/openrouter");
@@ -23,7 +23,7 @@ const { cancelDaily, cancelReminders, dailyOf, listReminders, setDaily } = requi
 const { getStore } = require("./companion/store");
 const { isOwner } = require("./services/access");
 const { redact } = require("./utils/redact");
-const { admitCallback, admitMessage, messageAuthorized } = require("./handlers/guard");
+const { admitAuthenticated, admitCallback, admitMessage, messageAuthorized } = require("./handlers/guard");
 const { IDEA_BUTTONS, IDEA_COMMANDS, dateStamp, kindForButton, createIdeaCommands, startSparkCode } = require("./handlers/ideas");
 const { callbackMessage, registerActions } = require("./handlers/actions");
 const { answerWithAi } = require("./handlers/reply");
@@ -309,7 +309,8 @@ async function sendMainMenu(chatId, userId = chatId) {
 
 // After a password login: the menu, then the spark of a "/start spark_<код>" link the person came with. The password
 // message is never passed on: the spark gets a message of its own with only the chat and the author, and a lease of
-// the session that has just been opened.
+// the session that has just been opened. The login consumed the original message before the allow-list and the rate
+// limit, so the spark is admitted by them here, like any message.
 async function afterLogin(msg, payload = null) {
   await sendMainMenu(msg.chat.id, msg.from.id);
 
@@ -318,8 +319,9 @@ async function afterLogin(msg, payload = null) {
   if (code) {
     const start = { message_id: `login:${crypto.randomBytes(6).toString("hex")}`, chat: msg.chat, from: msg.from, date: msg.date };
 
-    captureMessage(start);
-    await ideaCommands.sparkFromCode(start, code);
+    if (await admitAuthenticated(bot, start)) {
+      await ideaCommands.sparkFromCode(start, code);
+    }
   }
 }
 

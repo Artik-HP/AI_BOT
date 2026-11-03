@@ -78,6 +78,42 @@ test("/start spark_<код> через вход по паролю: после в
   });
 });
 
+test("/start spark_<код> через вход: человек не из BOT_ALLOWED_USER_IDS получает отказ доступа, а не карточку и ответ модели", async () => {
+  await withApp({ authenticatedFixtures: false, env: { ...IDEAS, BOT_ALLOWED_USER_IDS: "1" } }, async ({ tg, or }) => {
+    or.chat = () => reply("идеи в обход допуска");
+    await say(tg, 5705, `/start spark_${CODE}`);
+
+    const before = tg.texts().length;
+
+    tg.message({ chatId: 5705, text: TEST_PASSWORD });
+    await tg.waitFor(() => tg.texts().includes("Этот бот приватный: доступ только для приглашённых."), 10000, "отказ доступа после входа");
+    await tg.quiet(300);
+
+    assert.ok(!tg.texts().slice(before).some((text) => text.startsWith("🎲 Искра")), "карточка не отправлена");
+    assert.equal(or.chatRequests().length, 0, "модель не спрашивается");
+  });
+});
+
+test("/start spark_<код> через вход считается в лимит сообщений: повторный вход не даёт лишний ответ модели", async () => {
+  await withApp({ authenticatedFixtures: false, env: { ...IDEAS, RATE_LIMIT_MESSAGES: "1" } }, async ({ tg, or }) => {
+    or.chat = () => reply("идеи по ссылке");
+
+    for (let round = 0; round < 2; round += 1) {
+      await say(tg, 5706, `/start spark_${CODE}`);
+
+      const before = tg.texts().length;
+
+      tg.message({ chatId: 5706, text: TEST_PASSWORD });
+      await tg.waitFor(() => tg.texts().length >= before + 4, 10000, `вход ${round + 1}`);
+      await tg.quiet(300);
+      if (!round) await say(tg, 5706, "/logout");
+    }
+
+    assert.equal(or.chatRequests().length, 1, "вторая искра после выхода и входа упирается в лимит");
+    assert.match(tg.texts().at(-1), /^Слишком часто/);
+  });
+});
+
 test("/start spark_<мусор> через вход: после входа меню и подсказка, искра не бросается и модель не спрашивается", async () => {
   await withApp({ authenticatedFixtures: false, env: IDEAS }, async ({ tg, or }) => {
     await say(tg, 5704, "/start spark_zzzz");

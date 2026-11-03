@@ -6,7 +6,22 @@ const path = require("path");
 const { withApp } = require("../helpers/app");
 const { reply } = require("../helpers/fakeOpenRouter");
 const { emptyData } = require("../../src/companion/store");
-const { IDEAS, inlineKeyboard, readStore, say, userTurnOf } = require("../helpers/ideasChat");
+const { IDEAS, inlineKeyboard, lastMessage, readStore, say, toolCalls, toolResults, userTurnOf } = require("../helpers/ideasChat");
+
+const LABELS = { Область: "domain", Ограничение: "constraint", Поворот: "twist", "Для кого": "audience" };
+
+// { domain: "…", twist: "…" } from the lines of a spark card.
+function sparkOfCard(text) {
+  return Object.fromEntries(text.split("\n").map((line) => line.match(/^(Область|Ограничение|Поворот|Для кого): (.+)$/)).filter(Boolean)
+    .map(([, label, value]) => [LABELS[label], value]));
+}
+
+function dailyStore(chatId) {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "aibot-daily-")), "store.json");
+
+  fs.writeFileSync(file, JSON.stringify({ ...emptyData(), daily: { [chatId]: { chatId: String(chatId), userId: String(chatId), time: "09:00", timeZone: "", nextAt: Date.now() - 1000, tries: 0, createdAt: 0 } } }));
+  return file;
+}
 
 test("/daily: включить на время (ответ говорит, по какому поясу), посмотреть, выключить; в группе — подсказка; неверное время — формат", async () => {
   await withApp({ env: IDEAS }, async ({ tg, app }) => {
@@ -57,5 +72,34 @@ test("Искра дня приходит в срок картой без AI; «�
     for (const line of card.split("\n").filter((entry) => /^(Область|Ограничение|Поворот|Для кого): /.test(entry))) {
       assert.ok(userTurnOf(or).includes(line), `в запросе нет «${line}»`);
     }
+  });
+});
+
+test("«💡 Идеи к этой искре» под старой искрой дня делает её последней в чате: «поменяй …» меняет её, а не искру, брошенную позже", async () => {
+  await withApp({ env: { ...IDEAS, COMPANION_FILE: dailyStore(5804), COMPANION_REMINDER_TICK_MS: "200" } }, async ({ tg, or }) => {
+    await tg.waitFor(() => tg.texts().some((text) => text.startsWith("☀️ Искра дня")), 8000, "искра дня");
+
+    const call = tg.calls.find((entry) => entry.method === "sendMessage" && String(entry.params.text).startsWith("☀️ Искра дня"));
+    const [button] = inlineKeyboard(call.params).flat();
+    const daily = sparkOfCard(call.params.text);
+    const swapped = Object.keys(daily).find((name) => name !== "domain");
+
+    or.chat = () => reply("идеи");
+    const [later] = await say(tg, 5804, "/spark", { count: 2 });
+
+    assert.notEqual(sparkOfCard(later).domain, daily.domain, "позже брошена другая искра");
+
+    tg.callback({ chatId: 5804, data: button.callback_data, messageId: call.messageId });
+    await tg.waitFor(() => or.chatRequests().length === 2, 8000, "идеи по кнопке искры дня");
+    await tg.quiet(200);
+
+    or.chat = (record) => (lastMessage(record).role === "tool" ? reply(JSON.stringify(toolResults(record).at(-1))) : toolCalls(["idea_spark", { reroll: [swapped] }]));
+
+    const [rerolled] = JSON.parse((await say(tg, 5804, "поменяй это"))[0]).sparks;
+    const { [swapped]: changed, ...kept } = rerolled;
+    const { [swapped]: was, ...expected } = daily;
+
+    assert.deepEqual(kept, expected, "переброшена искра дня, остальное от неё");
+    assert.notEqual(changed, was);
   });
 });

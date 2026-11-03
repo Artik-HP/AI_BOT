@@ -4,9 +4,15 @@ const { trySendMessage } = require("../utils/safe");
 const { auth, passwordGate, captureMessage, messageAuthorized } = require("../services/auth");
 
 // One admission check for every kind of incoming message (text, command, voice, photo).
-// Other bots are limited by the bot-to-bot rules, people by the allow-list and the rate limit.
 async function admitMessage(bot, msg) {
   if (!await passwordGate(bot, msg)) return false;
+  return admitAuthenticated(bot, msg);
+}
+
+// The checks after the password: other bots by the bot-to-bot rules, people by the allow-list and the rate limit.
+// A request made on someone's behalf right after the login that consumed their message (the spark of a
+// "/start spark_<код>" link) goes through here too, so a login is never a way around them.
+async function admitAuthenticated(bot, msg) {
   captureMessage(msg);
   if (msg.from?.is_bot) {
     return claimIncomingBotMessage(msg);
@@ -54,6 +60,7 @@ function showTyping(bot, chatId) {
 module.exports = {
   messageAuthorized,
   admitMessage,
+  admitAuthenticated,
   admitCallback,
   showTyping
 };
