@@ -7,6 +7,7 @@ const { withApp } = require("../helpers/app");
 const { failure, reply } = require("../helpers/fakeOpenRouter");
 const { TOOL_NAMES, IDEA_PERSONA_TOOLS } = require("../../src/companion/tools");
 const { SPARK_POOLS, SPARK_LABELS, TECHNIQUES } = require("../../src/ideas/catalog");
+const { formatTechnique } = require("../../src/ideas/spark");
 
 // The test harness pins the companion character for the older suites; this one runs the real product default.
 const IDEAS = { COMPANION_DEFAULT_PERSONA: undefined };
@@ -346,6 +347,19 @@ function cardSpark(card) {
   }));
 }
 
+// The technique line of a card is "Приём «<name>»: <how>". A name may itself contain « » ("Пять «почему»"), so the name
+// runs up to the last » before ": " and not up to the first » (the earlier /Приём «.+?»/ failed on that one technique,
+// 1 run in 12, depending on which technique the random generator drew).
+const techniqueOfCard = (card) => card.match(/Приём «(.+)»: /)[1];
+
+test("название приёма достаётся из карточки целиком для каждого приёма каталога, в том числе с кавычками в названии", () => {
+  assert.ok(TECHNIQUES.some((technique) => /[«»]/.test(technique.name)), "в каталоге есть приём с кавычками в названии");
+
+  for (const technique of TECHNIQUES) {
+    assert.equal(techniqueOfCard(`🎲 Искра\nОбласть: x\n\n${formatTechnique(technique)}`), technique.name);
+  }
+});
+
 const REROLL_HINT = /перекину только это/;
 const rerollAsked = (or, reroll) => {
   or.chat = (record) => (lastMessage(record).role === "tool"
@@ -377,7 +391,7 @@ test("искру с карточки можно поменять в разгов
     }
 
     assert.ok(spark.twist && spark.twist !== shown.twist, "поворот новый");
-    assert.equal(`Приём «${result.technique.name}»`, card.match(/Приём «.+?»/)[0], "приём прежний");
+    assert.equal(result.technique.name, techniqueOfCard(card), "приём прежний");
   });
 });
 
