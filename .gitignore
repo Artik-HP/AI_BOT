@@ -25,3 +25,14 @@ coverage/
 
 # личные заметки
 ПОЛЕЗНЫЕ КОДЫ, КОМАНДЫ И Т.Д.txt
+
+# рантайм-состояние и сгенерированные артефакты: базы (с -wal/-shm), config.env прогонов, копии исходников и сборок.
+# Им не место в git: в них данные пользователей и токены (см. audit-reports/AUDIT_NEW_MODULES_2026-11-03_13-28.md, N-12)
+/data/
+/.local/
+/artifacts/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+config.env

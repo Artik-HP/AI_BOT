@@ -45,15 +45,55 @@ test("в исходниках нет невидимых и bidi-символов
   assert.deepEqual(offenders, []);
 });
 
-test("в репозитории нет отслеживаемых сессий, резервных копий памяти и .env (F001, F002)", () => {
-  const tracked = require("child_process")
+// Secrets and personal data (F001, F002) and, since the audit of the new modules, runtime state (N-12): databases with
+// their -wal/-shm files, per-run config.env copies, and the generated directories that held them.
+const SECRET_FILE = /(^|\/)(\.env|memory\.json(\..*)?|[^/]*\.session(-journal)?)$/;
+const RUNTIME_STATE = /(^|\/)([^/]*\.sqlite(-shm|-wal|-journal)?|config\.env)$|^(data|\.local|artifacts)\//;
+
+function trackedFiles() {
+  return require("child_process")
     .execFileSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" })
     .split("\n")
     .filter(Boolean);
-  const forbidden = tracked.filter((file) => /(^|\/)(\.env|memory\.json(\..*)?|[^/]*\.session(-journal)?)$/.test(file));
+}
 
-  assert.deepEqual(forbidden, []);
+test("в репозитории нет отслеживаемых сессий, резервных копий памяти и .env (F001, F002)", () => {
+  const tracked = trackedFiles();
+
+  assert.deepEqual(tracked.filter((file) => SECRET_FILE.test(file)), []);
   assert.ok(tracked.includes(".env.example"));
+});
+
+test("в репозитории нет отслеживаемых баз, config.env и сгенерированных каталогов data/.local/artifacts (N-12)", () => {
+  assert.deepEqual(trackedFiles().filter((file) => RUNTIME_STATE.test(file)), []);
+});
+
+test("шаблон рантайм-состояния узнаёт опасные пути и не трогает обычные файлы (N-12)", () => {
+  for (const file of ["data/commands.sqlite", "data/commands.sqlite-wal", "x/y/state.sqlite-shm", ".local/vps/config.env", "config.env", "artifacts/vps/a.tar.gz", ".local/audit/src/a.js"]) {
+    assert.match(file, RUNTIME_STATE, file);
+  }
+
+  for (const file of [".env.example", "src/config.js", "src/database.js", "tests/unit/config.test.js", "migrations/001_commercial_accounts.sql", "audit-reports/evidence/x.txt", "docs/data/readme.md"]) {
+    assert.doesNotMatch(file, RUNTIME_STATE, file);
+  }
+});
+
+test(".gitignore закрывает рантайм-состояние, чтобы его нельзя было добавить случайным git add -A (N-12)", () => {
+  const ignored = (file) => {
+    try {
+      require("child_process").execFileSync("git", ["check-ignore", "-q", file], { cwd: ROOT });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  for (const file of ["data/commands.sqlite", "data/commands.sqlite-wal", "some/dir/state.sqlite-shm", ".local/a/config.env", "config.env", "artifacts/vps/a.tar.gz", ".local/x/y.js"]) {
+    assert.ok(ignored(file), `${file} должен быть в .gitignore`);
+  }
+
+  assert.equal(ignored("src/config.js"), false);
+  assert.equal(ignored(".env.example"), false);
 });
 
 test(".env.example не содержит заглушек вида process.env.X (F008)", () => {
