@@ -91,10 +91,33 @@ class LabTelegram {
     } });
     this.sessions = new Map();
     this.pending = new Set();
+    this.lastUnavailableLogAt = 0;
   }
 
   ctx(msg) { return { chatId: msg.chat.id, userId: msg.from.id }; }
+
+  // hasSession() runs for every private text message (it decides whether the message belongs to the lab), so a broken
+  // or locked lab store must never reach ordinary chat: the lab is simply "off" until it is repaired.
   hasSession(msg) {
+    try {
+      return this.lookupSession(msg);
+    } catch (error) {
+      this.reportUnavailable(error);
+      return false;
+    }
+  }
+
+  // At most one line a minute, and only the stable reason: a flood of messages must not become a flood of log lines.
+  reportUnavailable(error) {
+    const now = Date.now();
+
+    if (now - this.lastUnavailableLogAt < 60000) return;
+    this.lastUnavailableLogAt = now;
+    logger.warn("The lab store is unavailable; the lab is off, ordinary chat is not affected", {
+      reason: /^LAB_[A-Z_]+$/.test(error?.message) ? error.message : error?.code || error?.name || "unknown" });
+  }
+
+  lookupSession(msg) {
     if (msg.chat.type !== "private" || String(msg.chat.id) !== String(msg.from?.id)) return false;
     const ctx = this.ctx(msg);
     const key = scopeKey(ctx);
@@ -528,14 +551,19 @@ class LabTelegram {
 
   // Idempotent, and it writes only when there is something to close: every logout and login of anyone calls it, and a
   // store.change() for a person who never opened the lab would add an empty scope (the file allows at most 1000).
+  // The login itself is already revoked in memory, so a store problem here is only logged.
   revokeUser(userId) {
     const ctx = { chatId: userId, userId };
     this.service.cancel(ctx);
     this.sessions.delete(`${userId}:${userId}`);
-    if (!fs.existsSync(this.service.store.filename)) return;
-    const scope = this.service.data(ctx);
-    if (scope.session || scope.view || scope.callbacks.length) {
-      this.service.store.change(ctx, (current) => { current.callbacks = []; current.view = null; current.session = null; });
+    try {
+      if (!fs.existsSync(this.service.store.filename)) return;
+      const scope = this.service.data(ctx);
+      if (scope.session || scope.view || scope.callbacks.length) {
+        this.service.store.change(ctx, (current) => { current.callbacks = []; current.view = null; current.session = null; });
+      }
+    } catch (error) {
+      this.reportUnavailable(error);
     }
   }
 

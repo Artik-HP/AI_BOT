@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const { promisify } = require("util");
 const { AsyncLocalStorage } = require("async_hooks");
 const CONFIG = require("../config");
+const { isOwner, checkRateLimit, shouldSendNotice, buildNoticeText } = require("./access");
 const scrypt = promisify(crypto.scrypt);
 const HASH_PATTERN = /^scrypt\$16384\$8\$1\$[a-f0-9]{32}\$[a-f0-9]{64}$/;
 // The only /start payload kept across a login: a spark from the website. Its code is checked by the consumer.
@@ -105,8 +106,11 @@ class PasswordAuth {
     const key = String(userId);
     if (!this.configured() || !this.validId(userId)) return { ok: false, reason: "unconfigured" };
     if (typeof password !== "string" || password.length > 256) return { ok: false, reason: "wrong" };
-    if ((this.failures.get(key)?.count || 0) >= this.maxFailures || this.globalFailures.length >= 50) return { ok: false, reason: "locked" };
-    if (this.pending.has(key) || this.pending.size >= 2 || this.sessions.size >= 10000) return { ok: false, reason: "busy" };
+    // Strangers share a global budget of wrong guesses and two password checks at a time. The owner (whose Telegram id
+    // cannot be forged) keeps a place of their own, otherwise ten throwaway accounts could keep the owner out for good.
+    const owner = isOwner(key);
+    if ((this.failures.get(key)?.count || 0) >= this.maxFailures || (!owner && this.globalFailures.length >= 50)) return { ok: false, reason: "locked" };
+    if (this.pending.has(key) || this.pending.size >= (owner ? 4 : 2) || this.sessions.size >= 10000) return { ok: false, reason: "busy" };
     this.pending.add(key);
     const epoch = crypto.randomBytes(16).toString("hex");
     this.epochs.set(key, epoch);
@@ -118,7 +122,7 @@ class PasswordAuth {
         const failure = this.failures.get(key) || { count: 0, until: this.now() + this.lockMs };
         failure.count++;
         if (this.failures.size < 10000) this.failures.set(key, failure);
-        this.globalFailures.push(this.now());
+        if (!owner) this.globalFailures.push(this.now());
         return { ok: false, reason: "wrong" };
       }
       let deadline = this.now() + this.ttl;
@@ -126,7 +130,11 @@ class PasswordAuth {
         let account;
         try { account = await this.accountPolicy(key); } catch { return { ok: false, reason: "database" }; }
         if (!account.allowed) return { ok: false, reason: "blocked" };
-        if (account.until) deadline = Math.min(deadline, new Date(account.until).getTime());
+        if (account.until) {
+          const until = new Date(account.until).getTime();
+          if (!Number.isFinite(until) || until <= this.now()) return { ok: false, reason: "blocked" };
+          deadline = Math.min(deadline, until);
+        }
       }
       if (epoch !== this.epochs.get(key)) return { ok: false, reason: "revoked" };
       this.sessions.set(key, { generation: crypto.randomBytes(16).toString("hex"), expires: deadline, credentialTag: this.tag(password) });
@@ -166,6 +174,12 @@ async function passwordGate(bot, msg) {
       return false;
     }
     return true;
+  }
+  // The prompts below are replies too: a stranger must not be able to make the bot answer without limit.
+  const limit = checkRateLimit(userId);
+  if (!limit.ok) {
+    if (shouldSendNotice(userId, "rate")) await bot.sendMessage(msg.chat.id, buildNoticeText({ reason: "rate", retryAfterSec: limit.retryAfterSec }));
+    return false;
   }
   const privateChat = msg.chat?.type === "private" && String(msg.chat.id) === String(userId);
   if (!privateChat) {

@@ -94,8 +94,10 @@ test("/start spark_<код> через вход: человек не из BOT_AL
   });
 });
 
+// Five messages per window: before the login /start and the password count too, so the first round spends three
+// (/start, password, the spark) and the second one runs out right at its spark.
 test("/start spark_<код> через вход считается в лимит сообщений: повторный вход не даёт лишний ответ модели", async () => {
-  await withApp({ authenticatedFixtures: false, env: { ...IDEAS, RATE_LIMIT_MESSAGES: "1" } }, async ({ tg, or }) => {
+  await withApp({ authenticatedFixtures: false, env: { ...IDEAS, RATE_LIMIT_MESSAGES: "5" } }, async ({ tg, or }) => {
     or.chat = () => reply("идеи по ссылке");
 
     for (let round = 0; round < 2; round += 1) {

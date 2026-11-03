@@ -6,6 +6,7 @@ const { isOwner } = require("./services/access");
 const { admitMessage, admitCallback, messageAuthorized } = require("./handlers/guard");
 const { isAddressedToThisBot } = require("./services/telegram");
 const { safeHandler } = require("./utils/safe");
+const logger = require("./utils/logger");
 const { formatTime } = require("./utils/time");
 
 // What /me says. A person without a row is not blocked (blocking is an explicit record), as for reminder delivery.
@@ -24,7 +25,11 @@ function registerAccounts(bot, database = getDatabase) {
       const db = database();
       if (!db) { await bot.sendMessage(chatId, "PostgreSQL ещё не подключена. Учёт пользователей появится после настройки базы."); return; }
       await task(db);
-    } catch { await bot.sendMessage(chatId, "Учёт пользователей недоступен. Администратору нужно проверить подключение и миграции PostgreSQL."); }
+    } catch (error) {
+      // The person gets a short message, the administrator gets the reason in the log (it is redacted: no connection string).
+      logger.error("Product accounts command failed:", error);
+      await bot.sendMessage(chatId, "Учёт пользователей недоступен. Администратору нужно проверить подключение и миграции PostgreSQL.");
+    }
   }
   bot.onText(/^\/(me|users|access)(?:@\w+)?(?:\s|$)/i, safeHandler("Product accounts command", async (msg, match) => {
     if (msg.from?.is_bot || !isAddressedToThisBot(msg.text)) return;
@@ -49,7 +54,10 @@ function registerAccounts(bot, database = getDatabase) {
         if (args[1] === String(msg.from.id)) { await bot.sendMessage(msg.chat.id, "Свой доступ этой командой изменять нельзя."); return; }
         const token = crypto.randomBytes(16).toString("hex");
         for (const [key, value] of confirmations) if (value.expires < Date.now()) confirmations.delete(key);
-        if (confirmations.size >= 100) throw new Error("CONFIRMATION_LIMIT");
+        if (confirmations.size >= 100) {
+          await bot.sendMessage(msg.chat.id, "Слишком много неподтверждённых изменений доступа. Подтверди или подожди 5 минут.");
+          return;
+        }
         const until = args[3] ? new Date(Date.now() + Number(args[3]) * 86400000).toISOString() : null;
         const sent = await bot.sendMessage(msg.chat.id, `Изменить доступ пользователя ${args[1]}: ${args[2]}, срок ${until || "без ограничения"}?`,
           { reply_markup: { inline_keyboard: [[{ text: "Подтвердить изменение доступа", callback_data: `access:${token}` }]] } });
@@ -75,7 +83,14 @@ function registerAccounts(bot, database = getDatabase) {
       if (auth.valid(item.lease)) await bot.sendMessage(query.message.chat.id, "Доступ обновлён. Старая сессия пользователя закрыта; следующий вход проверит новый статус.");
     });
   }));
-  return { close: async () => { if (CONFIG.DATABASE_URL) await database()?.close(); } };
+  // Shutdown must go on to the next step even when the database settings are broken (database() throws then).
+  return {
+    close: async () => {
+      if (!CONFIG.DATABASE_URL) return;
+      try { await database()?.close(); }
+      catch (error) { logger.warn("PostgreSQL pool could not be closed:", error); }
+    }
+  };
 }
 
 module.exports = { registerAccounts, describeAccess };

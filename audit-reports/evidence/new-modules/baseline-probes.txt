@@ -1,0 +1,33 @@
+# Пробы новых модулей на коммите 39517f9 (ДО исправлений)
+# запуск: node --test audit-reports/evidence/new-modules/probe-auth.test.js (и остальные); дата 2026-11-03T13:28:35Z
+
+## probe-auth.test.js (ok = дефект подтверждён)
+# owner login after 50 foreign failures -> {"ok":false,"reason":"locked"}
+ok 1 - P4a: 10 strangers x 5 wrong guesses lock the REAL owner out (global limit 50)
+# owner login while 2 strangers are being checked -> {"ok":false,"reason":"busy"}
+ok 2 - P4b: two concurrent strangers keep every scrypt slot busy for the owner
+# authenticate -> {"ok":true} | authenticated() right after: false
+ok 3 - P5: invalid access_until yields a session that is 'logged in' but already dead
+# failures recorded for user 777: none | global failures: 20
+ok 4 - P6: failures map full (10000) -> new wrong guesses are not counted per user
+# pass 4
+# fail 0
+
+## probe-e2e.test.js (ожидаемо: P1 ok = дефект подтверждён; P2 и P3 not ok = дефект подтверждён)
+# P1: 60 messages from an unauthenticated stranger (RATE_LIMIT_MESSAGES=5/min) -> 60 bot replies, 0 OpenRouter requests
+ok 1 - P1: a stranger without the password floods the bot - how many replies does he get?
+# P2: replies to a normal message with a corrupt lab file -> [] | OpenRouter chat requests: 0
+# P2: log tail: 2026-11-03T13:28:42.953Z ERROR Text message handler failed: ENOENT: ENOENT: no such file or directory, stat '/tmp/aibot-probe-rlZeBD/lab.json.bak'
+not ok 2 - P2: corrupt lab store file - does NORMAL private chat still work?
+# P3: replies to a normal message with a stale lock -> []
+# P3: after /lab -> ["Хранилище лаборатории занято другим процессом или требует проверки владельца."]
+not ok 3 - P3: stale lab lock left by a previous container run (same PID as the new process)
+# pass 1
+# fail 2
+
+## probe-store-cost.js
+companion store 3.5 MB: one tool call = 71 ms median, 81 ms worst (event loop is blocked for that long)
+lab store 7.8 MB: one button press = 144 ms median, 228 ms worst
+
+## probe-tools-fuzz.js
+{"calls":20000,"ok":1208,"refused":18792,"thrown":0,"storeErrors":0,"storeFileValid":true,"polluted":null,"objectProtoKeys":[],"ms":173,"fileKB":0}

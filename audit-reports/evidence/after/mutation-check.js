@@ -10,7 +10,7 @@ const path = require("path");
 
 const ROOT = path.resolve(__dirname, "..", "..", "..");
 const SUITE_TIMEOUT_MS = 240000;
-const COPIED = ["src", "scripts", "tests", "index.js", "package.json", "eslint.config.mjs", ".env.example", ".gitignore"];
+const COPIED = ["src", "scripts", "tests", "public", "migrations", "index.js", "package.json", "package-lock.json", "eslint.config.mjs", ".env.example", ".gitignore", "README.md", "ARCHITECTURE.md", "AGENTS.md"];
 
 const MUTATIONS = [
   { id: "M01", finding: "F003", what: "safeHandler пробрасывает ошибку обработчика", file: "src/utils/safe.js", find: "      logger.error(`${label} failed:`, error);\n      return undefined;", replace: "      throw error;" },
@@ -58,6 +58,18 @@ const MUTATIONS = [
   { id: "M44", finding: "S2-12", what: "другая ошибка опроса подавляется как «такая же»", file: "src/bot.js", find: "const repeat = signature === lastSignature;", replace: "const repeat = true;" },
   { id: "M45", finding: "S2-13", what: "уведомление об обрезке режет эмодзи", file: "src/services/telegram.js", find: "cutSafely(kept[last], TELEGRAM_MESSAGE_LIMIT - TRUNCATION_NOTICE.length)", replace: "kept[last].slice(0, TELEGRAM_MESSAGE_LIMIT - TRUNCATION_NOTICE.length)" },
   { id: "M46", finding: "S2-14", what: "стенд не перезапускает бота при занятом порте (плавающий сбой CI)", file: "tests/helpers/app.js", find: "if (!portTaken || attempt >= MAX_LAUNCH_ATTEMPTS) {", replace: "if (true) {" },
+  { id: "M47", finding: "N-01", what: "сбой лаборатории снова пробивается в обычный чат (hasSession)", file: "src/lab/telegram.js", find: "      return this.lookupSession(msg);\n    } catch (error) {\n      this.reportUnavailable(error);\n      return false;", replace: "      return this.lookupSession(msg);\n    } catch (error) {\n      throw error;" },
+  { id: "M48", finding: "N-01", what: "сбой лаборатории снова ломает /logout и /login (revokeUser)", file: "src/lab/telegram.js", find: "    } catch (error) {\n      this.reportUnavailable(error);\n    }\n  }", replace: "    } catch (error) {\n      throw error;\n    }\n  }" },
+  { id: "M49", finding: "N-02", what: "блокировка прошлого запуска с тем же PID снова считается живой", file: "src/lab/store.js", find: "const reusedPid = owner.pid === process.pid && predatesThisProcess(lock);", replace: "const reusedPid = false;" },
+  { id: "M50", finding: "N-02", what: "старый файл .recovery снова блокирует хранилище навсегда", file: "src/lab/store.js", find: "if (guardError.code !== \"EEXIST\" || !predatesThisProcess(guard)) throw guardError;", replace: "throw guardError;" },
+  { id: "M51", finding: "N-04", what: "общий предел неудач снова закрывает вход владельцу", file: "src/services/auth.js", find: "(!owner && this.globalFailures.length >= 50)", replace: "(this.globalFailures.length >= 50)" },
+  { id: "M52", finding: "N-05", what: "посторонние снова занимают все места проверки пароля", file: "src/services/auth.js", find: "this.pending.size >= (owner ? 4 : 2)", replace: "this.pending.size >= 2" },
+  { id: "M53", finding: "N-06", what: "нечитаемый срок доступа снова даёт «вход выполнен»", file: "src/services/auth.js", find: "if (!Number.isFinite(until) || until <= this.now()) return { ok: false, reason: \"blocked\" };", replace: "" },
+  { id: "M54", finding: "N-03", what: "ответы постороннему снова не ограничены по частоте", file: "src/services/auth.js", find: "const limit = checkRateLimit(userId);\n  if (!limit.ok) {", replace: "const limit = checkRateLimit(userId);\n  if (false) {" },
+  { id: "M55", finding: "N-07", what: "ошибки учёта пользователей снова не пишутся в лог", file: "src/accounts.js", find: "logger.error(\"Product accounts command failed:\", error);", replace: "" },
+  { id: "M56", finding: "N-07", what: "переполнение подтверждений снова выдаётся за сбой БД", file: "src/accounts.js", find: "if (confirmations.size >= 100) {", replace: "if (confirmations.size >= 100000) {" },
+  { id: "M57", finding: "N-08", what: "остановка снова падает из-за неверного DATABASE_URL", file: "src/accounts.js", find: "catch (error) { logger.warn(\"PostgreSQL pool could not be closed:\", error); }", replace: "catch (error) { throw error; }" },
+  { id: "M58", finding: "N-08", what: "неверный DATABASE_URL снова не называется при старте", file: "src/bot.js", find: "if (databaseProblem) {", replace: "if (false) {" },
   { id: "M35", finding: "F010", what: "лимит max_tokens снят", file: "src/services/openrouter.js", find: "max_tokens", replace: "max_tokens_disabled" }
 ];
 

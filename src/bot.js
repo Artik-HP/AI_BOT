@@ -170,6 +170,12 @@ function start() {
     logger.warn("BOT_PASSWORD_HASH не настроен: доступ к функциям закрыт.");
   }
 
+  // Without a usable database nobody can log in (the check fails closed), so say it at once and not at the first login.
+  const databaseProblem = CONFIG.DATABASE_URL ? require("./database").databaseUrlProblem(CONFIG.DATABASE_URL) : null;
+  if (databaseProblem) {
+    logger.error(`DATABASE_URL отклонён (${databaseProblem}): вход пользователей невозможен, пока настройка не исправлена.`);
+  }
+
   const bot = createTelegramBot();
   const accounts = require("./accounts").registerAccounts(bot);
   require("./services/auth").auth.accountPolicy = CONFIG.DATABASE_URL ? (userId) => require("./database").getDatabase().checkAccount(userId) : null;
